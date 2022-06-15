@@ -4,9 +4,6 @@
 # Date: September 5, 2019
 # 
 
-# Set working directory
-setwd("Z:/Rhypoxie")
-
 # Load libraries
 library(zoo)
 library(signal)
@@ -16,7 +13,7 @@ library(lubridate)
 library(tidyverse)
 
 # Read in all DO data
-df <- readRDS("Data/02_sensor_data/raw/raw_time_series_data.RDS")
+df <- readRDS(file.path("Data", "02_sensor_data", "raw", "raw_time_series_data.RDS"))
 
 # Change some naming for consistency
 df <- df %>%

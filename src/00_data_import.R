@@ -4,13 +4,6 @@
 # Date: July 20, 2020
 # 
 
-# Set working directory
-setwd("Z:/Rhypoxie")
-# setwd("C:/Users/jake.diamond/Documents/Backup of Network/Loire_DO")
-# setwd("//ly-lhq-srv/jake.diamond/Loire_DO")
-# setwd("C:/Users/diamo/Dropbox/Projects/RHypoxie")
-# setwd("C:/Users/jake.diamond/Dropbox/Projects/RHypoxie")
-
 # Load libraries
 library(lubridate)
 library(readxl)

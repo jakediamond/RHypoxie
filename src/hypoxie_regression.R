@@ -1,0 +1,163 @@
+
+
+
+ws <- readRDS("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/ws_land_use") %>%
+  mutate(site = tolower(site),
+         area_lu_frac = units::drop_units(area_lu_frac)) %>%
+  rename(ws_area_frac = area_lu_frac)
+buf <- readRDS("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/buffer_land_use_v2") %>%
+  mutate(area_lu_frac = units::drop_units(area_lu_frac)) %>%
+  rename(buff_area_frac = area_lu_frac)
+
+# mod format for buffers, only look at 50m at first
+buf_mod <- filter(buf, buff_dists == 20) %>%
+  ungroup() %>%
+  select(site, plot_name, buff_area_frac, buff_dists) %>%
+  pivot_wider(names_from = plot_name, values_from = buff_area_frac)
+
+
+# Load hydraulic data
+# Load geometry data
+df_k <- read_xlsx("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/hydraulic_data.xlsx") %>%
+  select(Site = site, width = width_m, depth = depth_m, slope = slope_tnet) %>%
+  mutate(site = tolower(Site)) %>%
+  select(-Site)
+
+# Hypoxia summary
+df_h <- df_loire %>%
+  mutate(date = date(datetime),
+         month = month(datetime),
+         DOhyp = if_else(DO < 4, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
+
+# temperature and discharge summary
+df_tq <- df_loire %>%
+  group_by(site) %>%
+  dplyr::summarize(temp = median(DO_temp, na.rm = T))
+
+df_hl <- df_h %>%
+  group_by(site) %>%
+  arrange(site, datetime) %>%
+  mutate(hyp_l = sequence(rle(DOhyp)$lengths),
+         hyp_change = if_else(lag(DOhyp) != DOhyp, 1, 0)) %>%
+  filter(DOhyp == 1) %>%
+  mutate(hyp_pd = cumsum(hyp_change)) %>%
+  group_by(site, hyp_pd) %>%
+  filter(hyp_l == max(hyp_l)) %>%
+  ungroup() %>%
+  group_by(site) %>%
+  dplyr::summarize(hypl = mean(hyp_l, na.rm = T),
+                   slope = mean(slope, na.rm = T),
+                   alt = mean(altitude_m, na.rm = T),
+                   area = mean(area_km2, na.rm = T),
+                   L50corr = mean(L50_corr, na.rm = T),
+                   H50corr = mean(H50_corr, na.rm = T),
+                   nw_b = mean(nw_b, na.rm = T),
+                   nw_f = mean(nw_f, na.rm = T),
+                   Q50corr = mean(Q50_corr, na.rm = T),
+                   strahler = mean(strahler, na.rm = T),
+                   slope = mean(slope, na.rm = T),
+                   SF = mean(SF, na.rm = T),
+                   h = mean(h ,na.rm = T),
+                   w = mean(w, na.rm = T),
+                   v = mean(v, na.rm = T)) %>%
+  left_join(buf_mod) %>%
+  left_join(df_tq)
+
+# Calculate daily stats by site
+df_hyp_mod <- df_h %>%
+  group_by(site) %>%
+  dplyr::summarize(DOhypn = round(sum(DOhyp, na.rm = T) / n() *100, 2),#percentage of time that is hypoxic
+            slope = mean(slope, na.rm = T),
+            alt = mean(altitude_m, na.rm = T),
+            area = mean(area_km2, na.rm = T),
+            L50corr = mean(L50_corr, na.rm = T),
+            H50corr = mean(H50_corr, na.rm = T),
+            nw_b = mean(nw_b, na.rm = T),
+            nw_f = mean(nw_f, na.rm = T),
+            Q50corr = mean(Q50_corr, na.rm = T),
+            strahler = mean(strahler, na.rm = T),
+            slope = mean(slope, na.rm = T),
+            SF = mean(SF, na.rm = T),
+            h = mean(h ,na.rm = T),
+            w = mean(w, na.rm = T),
+            v = mean(v, na.rm = T)) %>%
+  left_join(buf_mod)
+# 
+# # Summary of that data
+# df_daily_sum <- df_daily %>%
+#   pivot_longer(cols = -c(site, date)) %>%
+#   group_by(site, name) %>%
+#   filter(!is.infinite(value)) %>%
+#   summarize(mean = mean(value, na.rm = T),
+#             sd = sd(value, na.rm = T)) %>%
+#   ungroup()
+
+# Best subsets
+library(leaps)
+df_mod <- filter(df_hyp_mod, site != "coise aval vaudragon") %>%
+  select(-site, -h, -w) %>%
+  replace(is.na(.), 0) %>%
+  mutate(area = log(area))
+
+pivot_longer(df_mod,  cols = everything()) %>%
+  ggplot(aes(x = value)) + geom_histogram() + facet_wrap(.~name, scales = "free")
+
+models <- regsubsets(DOhypn ~ ., data = df_mod, nvmax = 5)
+summary(models)
+res.sum <- summary(models)
+data.frame(
+  Adj.R2 = which.max(res.sum$adjr2),
+  CP = which.min(res.sum$cp),
+  BIC = which.min(res.sum$bic)
+)
+pairs(df_mod)
+
+
+
+df_mod2 <- filter(df_hl, site != "coise aval vaudragon") %>%
+  select(-site, -h, -w) %>%
+  replace(is.na(.), 0) %>%
+  mutate(area = log(area))
+
+
+models2 <- regsubsets(hypl ~ ., data = df_mod2, nvmax = 5)
+summary(models2)
+res.sum2 <- summary(models2)
+data.frame(
+  Adj.R2 = which.max(res.sum2$adjr2),
+  CP = which.min(res.sum2$cp),
+  BIC = which.min(res.sum2$bic)
+)
+
+#load car package
+library(car)
+mod2 <- lm(hypl ~ Q50corr + `irrigated agriculture` + urban, df_mod2)
+#produce added variable plots
+avPlots(mod2)
+summary(mod2)
+
+pairs(df_mod2)
+
+
+
+# Set up a 2x2 grid so we can look at 4 plots at once
+par(mfrow = c(2,2))
+plot(res.sum2$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+plot(res.sum2$adjr2, xlab = "Number of Variables", ylab = "Adjusted RSq", type = "l")
+
+# We will now plot a red dot to indicate the model with the largest adjusted R^2 statistic.
+# The which.max() function can be used to identify the location of the maximum point of a vector
+adj_r2_max = which.max(res.sum2$adjr2) # 11
+
+# The points() command works like the plot() command, except that it puts points 
+# on a plot that has already been created instead of creating a new plot
+points(adj_r2_max, res.sum2$adjr2[adj_r2_max], col ="red", cex = 2, pch = 20)
+
+# We'll do the same for C_p and BIC, this time looking for the models with the SMALLEST statistic
+plot(res.sum2$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+cp_min = which.min(res.sum2$cp) # 10
+points(cp_min, res.sum2$cp[cp_min], col = "red", cex = 2, pch = 20)
+
+plot(res.sum2$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+bic_min = which.min(res.sum2$bic) # 6
+points(bic_min, res.sum2$bic[bic_min], col = "red", cex = 2, pch = 20)

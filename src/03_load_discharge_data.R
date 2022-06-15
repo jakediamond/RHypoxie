@@ -4,10 +4,6 @@
 # Date: 1 February 2022
 # 
 
-# Set working directory
-setwd("Z:/RHypoxie")
-# setwd("C:/Users/jake.diamond/Dropbox/Projects/RHypoxie")
-
 # Load libraries
 library(readxl)
 library(scales)
