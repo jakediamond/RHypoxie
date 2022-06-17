@@ -1,12 +1,8 @@
 # 
-# Purpose: To do a first analysis at all the headwaters data
+# Purpose: To do a first analysis of hypoxia on data from 2019-2021
 # Author: Jake Diamond
 # Date: 18 January 2022
 # 
-
-# Set working directory
-setwd("Z:/RHypoxie")
-# setwd("C:/Users/diamo/Dropbox/Projects/RHypoxie")
 
 # Load libraries
 library(lubridate)
@@ -16,15 +12,15 @@ library(tidytext)
 library(tidyverse)
 
 # Load data
-df <- readRDS("Data/hourly_data_all.RDS")
+df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS"))
 
-# Some quick calculations
+# Add info for light, time, and hypoxia (defined as less than 3 mg/L)
 df <- df %>%
   mutate(date = date(datetime),
          month = month(datetime),
          solartime = streamMetabolizer::calc_solar_time(datetime, longitude),
          light = streamMetabolizer::calc_light(solartime, latitude, longitude),
-         DOhyp = if_else(DO < 4, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
+         DOhyp = if_else(DO < 3, 1, 0)) #define hypoxia as less than 3 mg/Lsaturation (Carter et al. 2021 uses 50%)
 
 # Calculate daily stats by site
 df_daily <- df %>%
@@ -32,8 +28,22 @@ df_daily <- df %>%
   summarize(DOmax = max(DO, na.rm = T),
             DOmin = min(DO, na.rm = T),
             DOamp = DOmax - DOmin,
-            DOmean = mean(DO, na.rm = T),
-            DOhypn = round(sum(DOhyp, na.rm = T) / n() *100, 2)) #percentage of day that is hypoxic
+            DOmean = mean(DO, na.rm = T))
+
+df_daily %>%
+  ungroup() %>%
+  group_by(site) %>%
+  mutate(across(where(is.numeric), ~na_if(., Inf)),
+            across(where(is.numeric), ~na_if(., -Inf))) %>%
+  summarize(across(where(is.numeric), median, na.rm = T)) %>%
+  left_join(group_by(df, site) %>% summarize(hyp = sum(DOhyp, na.rm = T))) %>%
+  ggplot(aes(x = DOmin, y = hyp)) +
+  geom_point() +
+  theme_bw() +
+  stat_smooth(method = "lm") +
+  ggpubr::stat_cor()
+
+
 
 # Summary of that data
 df_daily_sum <- df_daily %>%
@@ -44,7 +54,7 @@ df_daily_sum <- df_daily %>%
             sd = sd(value, na.rm = T)) %>%
   ungroup() %>%
   mutate(name = as.factor(name),
-         site_p = reorder_within(site, mean, name))
+         site_p = tidytext::reorder_within(site, mean, name))
 
 # Quick summary graph
 df_daily %>%
@@ -88,102 +98,123 @@ ggplot(data = df_hyp,
   labs(x = "",
        y = "mean length of hypoxia (hours)")
 
- ggsave("Z:/RHypoxie/Figures/mean_length_hypoxia.png",
+ggsave("Z:/RHypoxie/Figures/mean_length_hypoxia.png",
        dpi = 600,
        width = 36,
        height  = 18.4,
        units = "cm",
        device = "png")
- 
- df_hyp %>%
-   mutate(hour = hour(datetime)) %>%
-   ggplot(aes(x = hour)) + 
-   geom_bar() +
-   theme_bw()+
-   labs(y = "hours of hypoxia",
-        x = "hour of day")
- 
- ggsave("Figures/hypoxia_by_hour.png",
-        dpi = 600,
-        width = 12,
-        height  = 8,
-        units = "cm",
-        device = "png")
- 
- df_hyp %>%
-   ggplot(aes(x = month)) + 
-   geom_bar() +
-   theme_bw()+
-   labs(y = "hours of hypoxia",
-        x = "month")
- 
- ggsave("Figures/hypoxia_by_hour_month.png",
-        dpi = 600,
-        width = 12,
-        height  = 8,
-        units = "cm",
-        device = "png")
- 
- df_hyp %>%
-   ggplot(aes(x = month)) + 
-   geom_bar() +
-   facet_wrap(~fct_reorder(site, -altitude_m), ncol = 3) +
-   theme_bw()+
-   labs(y = "hours of hypoxia",
-        x = "month")
- 
- ggsave("Figures/hypoxia_by_hour_month_site.png",
-        dpi = 600,
-        width = 32,
-        height  = 24,
-        units = "cm",
-        device = "png")
- 
- df_hyp %>%
-   mutate(hour = hour(datetime)) %>%
-   ggplot(aes(x = hour)) + 
-   geom_bar() +
-   facet_wrap(~fct_reorder(site, -altitude_m), ncol = 3) +
-   theme_bw()+
-   labs(y = "hours of hypoxia",
-        x = "hour of day")
- 
- ggsave("Figures/hypoxia_by_hour_and_site.png",
-        dpi = 600,
-        width = 32,
-        height  = 24,
-        units = "cm",
-        device = "png")
 
- 
- 
- # Sum of deficit
- 
- df_hyp %>%
-   mutate(def = if_else(is.na(DOsat), DOsat - DO, DOsat2 - DO)) %>%
-   filter(def > 0) %>%
-   ggplot(aes(x = fct_reorder(site, def, median),
-              y = def)) + 
-   geom_boxplot() +
-   coord_flip() +
-   # facet_wrap(~) +
-   theme_bw()+
-   labs(y = "hypoxia DO deficit (mg/L)",
-        x = "site")
- 
- ggsave("Figures/DO_hypoxia_deficit_and_site.png",
-        dpi = 600,
-        width = 18,
-        height  = 12,
-        units = "cm",
-        device = "png")
+df %>%
+  mutate(day = if_else(light > 200, "day", "night")) %>%
+  group_by(day) %>%
+  summarize(hyp = sum(DOhyp, na.rm = T))
 
- 
- # summarize that by number of events
+df %>%
+  mutate(day = if_else(between(month, 7, 9), "summer", "not")) %>%
+  group_by(day) %>%
+  summarize(hyp = sum(DOhyp, na.rm = T))
+
+
+df %>%
+  mutate(hour = hour(datetime)) %>%
+  ggplot(aes(x = hour, y = DOhyp)) + 
+  stat_summary() +
+  # geom_bar() +
+  theme_bw()+
+  labs(y = "hours of hypoxia",
+       x = "hour of day")
+
+ggsave("Figures/hypoxia_by_hour.png",
+       dpi = 600,
+       width = 12,
+       height  = 8,
+       units = "cm",
+       device = "png")
+
+df_hyp %>%
+  ggplot(aes(x = month)) + 
+  geom_bar() +
+  theme_bw()+
+  labs(y = "hours of hypoxia",
+       x = "month")
+
+ggsave("Figures/hypoxia_by_hour_month.png",
+       dpi = 600,
+       width = 12,
+       height  = 8,
+       units = "cm",
+       device = "png")
+
+df_hyp %>%
+  ggplot(aes(x = DO_temp, y = DO)) + 
+  stat_summary_bin() +
+  theme_bw()+
+  labs(y = "hours of hypoxia",
+       x = "month")
+
+
+
+df_hyp %>%
+  ggplot(aes(x = month)) + 
+  geom_bar() +
+  facet_wrap(~fct_reorder(site, -altitude_m), ncol = 3) +
+  theme_bw()+
+  labs(y = "hours of hypoxia",
+       x = "month")
+
+ggsave("Figures/hypoxia_by_hour_month_site.png",
+       dpi = 600,
+       width = 32,
+       height  = 24,
+       units = "cm",
+       device = "png")
+
+df_hyp %>%
+  mutate(hour = hour(datetime)) %>%
+  ggplot(aes(x = hour)) + 
+  geom_bar() +
+  facet_wrap(~fct_reorder(site, -altitude_m), ncol = 3) +
+  theme_bw()+
+  labs(y = "hours of hypoxia",
+       x = "hour of day")
+
+ggsave("Figures/hypoxia_by_hour_and_site.png",
+       dpi = 600,
+       width = 32,
+       height  = 24,
+       units = "cm",
+       device = "png")
+
+
+
+# Sum of deficit
+
+df_hyp %>%
+  mutate(def = if_else(is.na(DOsat), DOsat - DO, DOsat2 - DO)) %>%
+  filter(def > 0) %>%
+  ggplot(aes(x = fct_reorder(site, def, median),
+             y = def)) + 
+  geom_boxplot() +
+  coord_flip() +
+  # facet_wrap(~) +
+  theme_bw()+
+  labs(y = "hypoxia DO deficit (mg/L)",
+       x = "site")
+
+ggsave("Figures/DO_hypoxia_deficit_and_site.png",
+       dpi = 600,
+       width = 18,
+       height  = 12,
+       units = "cm",
+       device = "png")
+
+
+# summarize that by number of events
 df_hyp %>%
   summarize(pds = max(hyp_pd, na.rm = T)) %>%
   ggplot(aes(x = fct_reorder(site, pds),
-           y = pds)) +
+             y = pds)) +
   geom_point() +
   scale_y_continuous(breaks = seq(0,15,2)) +
   # stat_summary(fun = max) +
@@ -268,9 +299,9 @@ ggsave("Z:/RHypoxie/Figures/discharge_comparison.png",
 # Some time series
 df_daily %>%
   transmute(max = slider::slide_dbl(DOmax, mean, before = 7, na_rm = T),
-         min = slider::slide_dbl(DOmin, mean, before = 7, na_rm = T),
-         mean = slider::slide_dbl(DOmean, mean, before = 7, na_rm = T),
-         date = date) %>%
+            min = slider::slide_dbl(DOmin, mean, before = 7, na_rm = T),
+            mean = slider::slide_dbl(DOmean, mean, before = 7, na_rm = T),
+            date = date) %>%
   pivot_longer(cols = max:mean) %>%
   mutate(value = if_else(is.infinite(value), NA_real_, value)) %>%
   ggplot(aes(x = date,
@@ -293,7 +324,7 @@ ggsave("Z:/RHypoxie/Figures/max_min_do_ts.png",
 df_day_night <- df %>%
   filter(DOhyp == 1) %>%
   mutate(day = if_else(light == 0, "night", "day"),
-            date = date) %>%
+         date = date) %>%
   group_by(site, day) %>%
   summarize(n = n()) %>%
   ungroup() %>%
@@ -351,12 +382,12 @@ df_may_event <- df %>%
                      "vernus")) %>%
   group_by(site) %>%
   mutate(DO = imputeTS::na_kalman(DO))
-  # group_by(site) %>%
-  # filter(sum(DOhyp, na.rm = T) > 1)
+# group_by(site) %>%
+# filter(sum(DOhyp, na.rm = T) > 1)
 
 a = ggplot(data = df_may_event,
-       aes(x = datetime,
-           y = DO)) +
+           aes(x = datetime,
+               y = DO)) +
   geom_line()+
   facet_wrap(~site)+
   # scale_color_viridis_d()+
@@ -370,8 +401,8 @@ df_l <- df_may_event %>%
   pivot_longer(cols = c(Q_rat, Q_grez, Q_char, rain_mm))
 
 b = ggplot(data = df_may_event,
-       aes(x = datetime,
-           y = rain_mm)) +
+           aes(x = datetime,
+               y = rain_mm)) +
   geom_line(color = "blue") +
   scale_y_continuous(position = "right") +
   facet_wrap(~site)+
@@ -400,7 +431,7 @@ ggsave("Figures/may10_event_DO.png",
 
 df_aug <- df %>%
   bind_rows(readRDS("C:/Users/diamo/Dropbox/Projects/Loire_headwaters/Headwaters/Data/headwaters_data_clean") %>%
-                        rename(site = Site, watershed = Subwatershed, q_mmh = q_mmd, lux_water = lux) %>%
+              rename(site = Site, watershed = Subwatershed, q_mmh = q_mmd, lux_water = lux) %>%
               mutate(date = date(datetime),
                      year= year(date))) %>%
   filter((between(date, ymd(20210809), ymd(20210816)) |
@@ -450,8 +481,8 @@ df_aug <- df_aug %>%
                        "Coise aval Rieu",
                        "Doise",
                        "Vizézy amont Bullieux")),
-           !(site == "Carrat" & date > ymd("20200715")),
-           !(site == "Moulin Piquet la Rapine" & date > ymd("20200714")))
+         !(site == "Carrat" & date > ymd("20200715")),
+         !(site == "Moulin Piquet la Rapine" & date > ymd("20200714")))
 
 ggplot() +
   geom_line(data = filter(df_aug, year == 2020),
@@ -579,11 +610,11 @@ df_april_event <- df %>%
                      year= year(date))) %>%
   filter(between(date, ymd(20200416), ymd(20200420))) %>%
   filter(site_code %in% c("tor076",
-                   "loi132",
-                     "loi039",
-                     "cha057",
-                     "pot025",
-                   "coi071")) %>%
+                          "loi132",
+                          "loi039",
+                          "cha057",
+                          "pot025",
+                          "coi071")) %>%
   group_by(site_code) %>%
   mutate(DO = imputeTS::na_kalman(DO))
 # group_by(site) %>%

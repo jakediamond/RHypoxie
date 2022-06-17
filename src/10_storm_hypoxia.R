@@ -3,19 +3,68 @@
 # Purpose: Analyze headwater data for storm-induced hypoxia
 # Date: 12 may 2022
 # -------------------------------------
-# Set working directory
-setwd("Z:/RHypoxie")
-# setwd("C:/Users/diamo/Dropbox/Projects/RHypoxie")
-
 # Load libraries
 library(lubridate)
 library(scales)
+library(readxl)
 library(patchwork)
 library(tidyverse)
 
-# Single event 
-# Load data
-df <- readRDS("Data/hourly_data_all.RDS")
+# Load all cleaned sensor data
+df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
+
+# Load all hyporheic zone data for the Ratier amont Charbonnieres
+df_hr <- read_excel(file.path("data", "02_sensor_data", "raw", "bdoh", "hyporheic_data.xlsx"))
+
+# Clean it up to be same format as sensor data
+df_hr <- df_hr %>%
+  mutate(datetime = with_tz(datetime_UTC, "Europe/Berlin"), 
+    hour = floor_date(datetime, "hour")) %>%
+  group_by(hour) %>%
+  summarize(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  rename(datetime = hour,
+         spc = spc_uscm,
+         DO = DO_mgL) %>%
+  ungroup()
+
+# Compare
+df_storm <- filter(df, between(datetime, ymd_h(2021041500), ymd_h(2021043000)),
+                   site == "ratier amont charbonnieres") %>%
+  mutate(type = "surface") %>%
+  bind_rows(filter(df_hr, between(datetime, ymd_h(2021041500), ymd_h(2021043000))) %>%
+               mutate(type = "hyporheic"))
+
+df_storm2 <- filter(df,
+                   site == "ratier aval ribes") %>%
+  mutate(type = "surface") %>%
+  bind_rows(df_hr %>%
+              mutate(type = "hyporheic"))
+
+p <- ggplot(data = df_storm2,
+       aes(x = datetime,
+           y = spc,
+           color = type)) +
+  geom_line() +
+  theme_bw()
+
+plotly::ggplotly(p)
+
+df_hrdif <- df_storm2 %>%
+  mutate(date = date(datetime)) %>%
+  group_by(date, type) %>%
+  summarize(maxt = datetime[max(DO, na.rm = T)]) %>%
+  mutate(hr = hour(maxt)) %>%
+  ungroup() %>%
+  select(-maxt) %>%
+  pivot_wider(values_from = hr, names_from = type) %>%
+  mutate(dift = surface - hyporheic)
+
+ggplot(data = df_hrdif,
+       aes(x = date,
+           y = dift)) +
+  geom_point() +
+  geom_line() +
+  theme_bw()
 
 # Some quick calculations
 df <- df %>%
