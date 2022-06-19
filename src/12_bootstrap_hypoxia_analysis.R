@@ -1,5 +1,5 @@
 # 
-# Purpose: To do a first analysis of hypoxia on data from 2019-2021
+# Purpose: To evaluate how sampling length and number of sites affects incidence of hypoxia
 # Author: Jake Diamond
 # Date: 17 June 2022
 # 

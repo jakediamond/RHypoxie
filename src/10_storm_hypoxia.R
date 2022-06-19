@@ -76,6 +76,17 @@ df <- df %>%
          DOsat2 = if_else(is.na(DOsat2), DO/DO_per*100, DOsat2),
          q_mmh = if_else(is.na(q_mmh), q_mmd / 24, q_mmh),
          DOhyp = if_else(DO < 4, 1, 0))
+
+ggplot(data = filter(df, site == "ruisseau de violay",
+                     between(datetime, ymd_h("2020041500"), ymd_h("2020052000"))
+                     )) +
+  # geom_point(aes(y = q_mmh)) +
+  # stat_summary(aes(x = date, y = lux / 100)) +
+  geom_point(aes(x = datetime, y = lux / 500)) +
+  geom_line(aes(x = datetime, y = DO_per)) +
+  theme_bw()
+
+
 # Event look along network ------------------------------------------------
 plot_fun <- function(startdate, enddate) {
   df_event = df %>%
