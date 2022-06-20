@@ -65,13 +65,25 @@ hypl_boot <- map_dfr(1:100, ~ hyp.samp.fun(sample_frame, dfhyp))
 # Save this
 saveRDS(hypl_boot, "results/bootstrap_sampling_hypoxia.RDS")
 
-
+hypl_boot <- readRDS(file.path("results", "bootstrap_sampling_hypoxia.RDS"))
 # Plot
 group_by(hypl_boot, sites, times) %>%
   summarize(per = mean(perhyp / sites),
             sd = sd(perhyp)) %>%
-  ggplot(aes(x = sites, y = times,
+  ggplot(aes(x = times, y = sites,
              color = per * 100,
-             size = sd * 100)) +
+             size = sd)) +
   geom_point() +
-  scale_color_viridis_c()
+  scale_color_viridis_c(name = "% hypoxia") + 
+  scale_size_continuous(name = "std.dev.") +
+  theme_bw() +
+  ggtitle("hypoxia observed ~ f(spacetime sampled), 100 bootstrap samples")
+
+tru = sum(df$DOhyp, na.rm = T) / nrow(df)
+
+ggsave("results/Figures/bootstrap_sampling_hypoxia.png",
+       dpi = 1200,
+       units = "cm",
+       height = 12,
+       width = 18.4
+       )

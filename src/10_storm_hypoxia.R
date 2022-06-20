@@ -13,6 +13,9 @@ library(tidyverse)
 # Load all cleaned sensor data
 df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
 
+# Load hypoxia metadata
+df_hyp <- read_xlsx("Z:/RHypoxie/Data/01_metadata/hypoxia_dates.xlsx")
+
 # Load all hyporheic zone data for the Ratier amont Charbonnieres
 df_hr <- read_excel(file.path("data", "02_sensor_data", "raw", "bdoh", "hyporheic_data.xlsx"))
 
@@ -91,20 +94,20 @@ ggplot(data = filter(df, site == "ruisseau de violay",
 plot_fun <- function(startdate, enddate) {
   df_event = df %>%
     filter(between(date, ymd(startdate), ymd(enddate))) %>%
-    filter(!(site %in% c("ardevel amont vernus",
-                         "vernus",
-                         "ardevel aval vernus",
-                         "vauxonne",
-                         "sallarin",
-                         "thielas",
-                         "samsons amont thielas",
-                         "samsons aval thielas",
-                         "ribes",
-                         "le rieu",
-                         "potensinet",
-                         "coizet",
-                         "miloniere",
-                         "thiollet"))) %>%
+    # filter(!(site %in% c("ardevel amont vernus",
+    #                      "vernus",
+    #                      "ardevel aval vernus",
+    #                      "vauxonne",
+    #                      "sallarin",
+    #                      "thielas",
+    #                      "samsons amont thielas",
+    #                      "samsons aval thielas",
+    #                      "ribes",
+    #                      "le rieu",
+    #                      "potensinet",
+    #                      "coizet",
+    #                      "miloniere",
+    #                      "thiollet"))) %>%
     group_by(site) %>%
     filter(!all(is.na(DO))) %>%
     arrange(datetime) %>%
@@ -202,7 +205,7 @@ plot_fun <- function(startdate, enddate) {
   }
 }
 
-plot_fun("20210618", "20210626")
+plot_fun("20210420", "20210505")
 ggsave(filename = "Figures/storm_event_examples/20210622.png",
        dpi = 1200,
        width = 22,
@@ -253,7 +256,7 @@ st_meta = filter(df_hyp, type == "storm_down") %>%
          recovery_start = lubridate::force_tz(recovery_start, tzone = "Europe/Berlin"),
          recovery_end = lubridate::force_tz(recovery_end, tzone = "Europe/Berlin"))
 
-df_st <- ungroup(df_loire) %>%
+df_st <- ungroup(df) %>%
   select(-position, -number, -confluence) %>%
   distinct() %>%
   fuzzyjoin::fuzzy_semi_join(st_meta,
@@ -327,3 +330,105 @@ ggplot(data = df_th_st,
   labs(title = "time until first instance of hypoxia after storm",
        y = "time until hypoxia (hours)",
        x = "starting discharge (m3/s)")
+
+
+
+# theme for discharge plots
+p_theme_q <- 
+  theme_minimal() +
+  theme(panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
+        plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+        panel.grid.major = element_blank(), #remove major gridlines
+        panel.grid.minor = element_blank(), #remove minor gridlines
+        legend.background = element_rect(fill='transparent'), #transparent legend bg
+        legend.box.background = element_rect(fill='transparent'),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) #transparent legend panel)
+
+layout <- c(
+  area(t = 1, l = 1, b = 8, r = 4),
+  area(t = 6, l = 1, b = 8, r = 4)
+)
+
+
+
+# Test
+df_s <- filter(df,
+               site_code %in% c("loi033", "viz062", "mar167", "coi350"),
+               between(datetime, ymd_h("2019071900"), ymd_h("2019080300")))
+p_do <- ggplot(data = df_s,
+       aes(x = datetime,
+           y = DO_per,
+           group = site_code)) +
+  geom_line(color = "grey") +
+  theme_bw()
+p_do
+
+
+p_q <- ggplot(data = df_s,
+               aes(x = datetime,
+                   y = q_mmd,
+                   group = site_code)) +
+  geom_line(color = "blue") +
+  scale_y_continuous(position = "right") +
+  labs(y = expression("q (mm"~d^{-1}*")")) +
+  p_theme_q
+p_q
+
+p_do + p_q + plot_layout(design = layout)
+
+
+
+
+
+
+# Test of spc and DO entropy ----------------------------------------------
+ent.fun <- function(x) {
+  runmean = slider::slide_dbl(x, mean, na.rm = T, .before = Inf)
+  tosum = (x / runmean) * log(x / runmean)
+  ent = slider::slide_dbl(tosum, sum, na.rm = T)
+}
+
+df_e <- df %>%
+  arrange(site, datetime) %>%
+  group_by(site) %>%
+  mutate(DOent = ent.fun(DO_per),
+         spcent = ent.fun(spc))
+
+df_e2 <- filter(df_e, spcent != 0 )
+
+
+
+
+ggplot(data=filter(df_e, site == "moulin piquet aval",
+                   between(datetime, ymd_h("2020091200"), ymd_h("2020092500"))),
+       aes(x = cond,
+           y = DO_per,
+           color = datetime)) +
+  geom_path() +
+  scale_color_viridis_c()
+
+
+ggplot() +
+  geom_line(data = filter(df_st_p, gs == "2 coise aval rieu"),
+            aes(x = hour,
+                y = DO, group = gs),
+            alpha = 0.5)+
+  geom_point(data = filter(df_st_p, gs == "2 coise aval rieu"),
+             aes(x = hour, y = q_mmh * 100), color = "blue") +
+  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
+  # facet_wrap(~site, scales = "free_x")+
+  # scale_color_manual(values = "blue") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+b
+
+dats = c("2 charpassonne château de donzy", "2 coise aval rieu")
+
+dat_st= filter(df_st_p, gs %in% c(dats)) %>%
+  bind_rows(filter(df, site == "ratier aval ribes",
+                   between(date, ymd("20210429"), ymd("20210506"))))
+writexl::write_xlsx(dat_st, file.path("data", "storm_data_for_remi_model.xlsx"))

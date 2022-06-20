@@ -63,7 +63,7 @@ df_dry <- ungroup(df_loire) %>%
 
 # Save the data for later use
 saveRDS(df_dry, "Z:/RHypoxie/Data/hypoxia_drying.RDS")
-df_dry <- readRDS("Z:/RHypoxie/Data/hypoxia_drying.RDS")
+df_dry <- readRDS(file.path("data" ,"hypoxia_drying.RDS"))
 
 
 # Characterize the hypoxia ------------------------------------------------
@@ -449,3 +449,28 @@ ggplot(data = df_th_st,
        y = "time until hypoxia (hours)",
        x = "starting discharge (m3/s)")
 
+
+
+
+
+
+ggplot() +
+  geom_line(data = filter(df_dry_p, gs == "2 charpassonne château de donzy"),
+            aes(x = hourbef,
+                y = DO, group = gs),
+            alpha = 0.5)+
+  geom_point(data = filter(df_dry_p, color == TRUE, gs == "5 charpassonne le tél"),
+             aes(x = hourbef, y = DO, color = color)) +
+  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
+  # facet_wrap(~site, scales = "free_x")+
+  scale_color_manual(values = "blue") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+
+
+dat = c("4 charpassonne le tél", "5 charpassonne le tél", "3 loise aval doise salt",
+        "9 toranche aval", "3 coise la bruyere", "2 charpassonne château de donzy")
+c
+dat_dry = filter(df_dry_p, gs %in% c(dat))
+writexl::write_xlsx(dat_dry, file.path("data", "data_for_remi_model.xlsx"))
