@@ -8,6 +8,7 @@
 library(lubridate)
 library(readxl)
 library(scales)
+library(patchwork)
 library(tidytext)
 library(tidyverse)
 
@@ -18,9 +19,166 @@ df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS"))
 df <- df %>%
   mutate(date = date(datetime),
          month = month(datetime),
+         year = year(date),
          solartime = streamMetabolizer::calc_solar_time(datetime, longitude),
-         light = streamMetabolizer::calc_light(solartime, latitude, longitude),
-         DOhyp = if_else(DO < 3, 1, 0)) #define hypoxia as less than 3 mg/Lsaturation (Carter et al. 2021 uses 50%)
+         light = streamMetabolizer::calc_light(solartime, latitude, longitude)) %>%
+  filter(between(month, 3, 10),#don't trust data outside of these months
+         !(is.na(DO) & month == 10), # some data at the end of the files are NA
+         (oow == "no" | is.na(oow))) %>% #don't want to include data when streams are dry
+  mutate(DO = if_else(site %in% c("carrat", "toranche st cyr les vignes", "le rieu")
+                      & month == 4 & DO < 3, NA_real_, DO)) %>% # also filter some times I know a sensor is buried
+  mutate(DOhyp = if_else(DO < 3, 
+                         1, 
+                         0)) #define hypoxia as less than 3 mg/Lsaturation 
+# (Carter et al. 2021 uses 50%)
+
+# Some plotting info for the rest -----------------------------------------
+
+theme_second_axis <- theme_minimal() +
+  theme(panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
+        plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+        panel.grid.major = element_blank(), #remove major gridlines
+        panel.grid.minor = element_blank(), #remove minor gridlines
+        legend.background = element_rect(fill='transparent'), #transparent legend bg
+        legend.box.background = element_rect(fill='transparent'),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) #transparent legend panel)
+
+layout <- c(
+  area(t = 1, l = 1, b = 3, r = 4),
+  area(t = 1, l = 1, b = 3, r = 4)
+)
+
+layout2 <- c(
+  area(t = 1, l = 1, b = 6, r = 4),
+  area(t = 1, l = 1, b = 3, r = 4),
+  area(t = 3, l = 1, b = 6, r = 4)
+)
+
+filter(df, year(date) == 2019) %>%
+  group_by(month) %>%
+  summarize(hy = sum(DOhyp, na.rm = T),
+            n = n(),
+            per = hy / n)
+# Plot of monthly hypoxia, temp, q ----------------------------------------
+
+p_monthly_hyp <- df %>%
+  mutate(year = year(date)) %>%
+  group_by(year, month) %>%
+  summarize(hy = sum(DOhyp, na.rm = T),
+            n = n(),
+            per = hy / n) %>%
+  ggplot() + 
+  geom_col(aes(x = month,
+               y = per,
+               group = month)) + 
+  # geom_text(aes(x = 10, y = 0.18, label = sum(n), group = year)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(min(df$month), max(df$month), 1)) +
+  facet_grid(~year, space = "free", scales = "free_x") +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        panel.grid = element_blank()) +
+  labs(y = "% of measurements hypoxic",
+       x = "month")
+p_monthly_hyp
+
+p_monthly_temp <- df %>%
+  mutate(year = year(date)) %>%
+  ggplot(aes(x = month,
+             y = DO_temp)) + 
+  stat_summary(color = "red", geom = "line") +
+  stat_summary(color = "red") +
+  facet_grid(~year, space = "free", scales = "free_x") +
+  theme_second_axis +
+  theme(axis.title = element_text(color = "red"),
+        axis.text = element_text(color = "red")) +
+  scale_x_continuous(breaks = seq(min(df$month), max(df$month), 1))+
+  scale_y_continuous(position = "right") +
+  # labs(y = expression("q (mm"~h^{-1}*")")) +
+  labs(y = expression("stream temperature ("*degree*"C)"),
+       x = "month")
+
+p_monthly_q <- df %>%
+  mutate(year = year(date),
+         q_mmd = if_else(is.na(q_mmd), q_mmh *24, q_mmd)) %>%
+  ggplot(aes(x = month,
+             y = q_mmd)) + 
+  stat_summary(fill = "blue", geom = "ribbon", alpha = 0.4, ymin = 0) +
+  # stat_summary(color = "blue") +
+  facet_grid(~year, space = "free", scales = "free_x") +
+  theme_second_axis +
+  theme(axis.title = element_text(color = "blue"),
+        axis.text = element_text(color = "blue")) +
+  scale_y_continuous(position = "right") +
+  # labs(y = expression("q (mm"~h^{-1}*")")) +
+  labs(y = expression("q ("*mm~d^{-1}*")"),
+       x = "month")
+p_monthly_q
+
+p_month <- p_monthly_hyp + p_monthly_temp + p_monthly_q +
+  plot_layout(design = layout2)
+p_month
+
+# Hypoxia events and their lengths ----------------------------------------
+# Hypoxia period lengths
+df_hyp <- df %>%
+  group_by(site) %>%
+  arrange(site, datetime) %>%
+  mutate(hyp_l = sequence(rle(DOhyp)$lengths),
+         hyp_change = if_else(((lag(DOhyp, default = 0) != DOhyp) &
+                                 (lag(DOhyp, 2, default = 0) != DOhyp)), 
+                              1, 0)) %>%
+  filter(DOhyp == 1) %>%
+  mutate(hyp_pd = cumsum(replace_na(hyp_change, 0)))
+
+# number of hypoxic events
+p_num_events <- ungroup(df_hyp) %>%
+  group_by(month, site, year) %>%
+  summarize(pds = max(hyp_pd, na.rm = T)) %>%
+  ungroup() %>%
+  ggplot(aes(x = month,
+             y = pds)) +
+  stat_summary() +
+  stat_summary(geom = "line") +
+  # geom_point() +
+  facet_grid(~year, space = "free", scales = "free_x") +
+  # scale_y_continuous(breaks = seq(0,15,2)) +
+  # stat_summary(fun = max) +
+  # coord_flip() +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        panel.grid = element_blank()) +
+  labs(x = "",
+       y = " mean number of hypoxic events")
+p_num_events
+
+p_length_events <- ungroup(df_hyp) %>%
+  group_by(site, hyp_pd) %>%
+  filter(hyp_l == max(hyp_l)) %>%
+  ggplot(aes(x = month,
+             y = hyp_l)) +
+  stat_summary(color = "dark grey") +
+  stat_summary(geom = "line", color = "dark grey") +
+  facet_grid(~year, space = "free", scales = "free_x") +
+  scale_y_continuous(position = "right") +
+  theme_second_axis + 
+  theme(axis.text = element_text(color = "dark grey"),
+        axis.title = element_text(color = "dark grey")) + 
+  labs(x = "",
+       y = "mean length of hypoxic events (hours)")
+
+p_events <- p_num_events + p_length_events +
+  plot_layout(design = layout)
+p_events
+# Analysis ----------------------------------------------------------------
+
+
+
+# Get a dataframe of just discharge
+df_q <- distinct(da)
 
 # Calculate daily stats by site
 df_daily <- df %>%
@@ -146,12 +304,6 @@ ggsave("Figures/hypoxia_by_hour.png",
        units = "cm",
        device = "png")
 
-df_hyp %>%
-  ggplot(aes(x = month)) + 
-  geom_bar() +
-  theme_bw()+
-  labs(y = "hours of hypoxia",
-       x = "month")
 
 ggsave("Figures/hypoxia_by_hour_month.png",
        dpi = 600,
