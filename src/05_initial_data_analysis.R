@@ -105,6 +105,20 @@ ggsave("Z:/RHypoxie/Figures/mean_length_hypoxia.png",
        units = "cm",
        device = "png")
 
+ungroup(df_hyp) %>%
+  group_by(site, hyp_pd) %>%
+  filter(hyp_l == max(hyp_l),
+         year(date) < 2021) %>%
+  ggplot(aes(x = longitude,
+             y = hyp_l)) +
+  stat_summary() +
+  # coord_flip() +
+  theme_bw() +
+  labs(x = "",
+       y = "mean length of hypoxia (hours)")
+
+
+
 df %>%
   mutate(day = if_else(light > 200, "day", "night")) %>%
   group_by(day) %>%

@@ -1,11 +1,24 @@
+# 
+# Purpose: To try to predict hypoxia metrics with land use/GIS daa
+# Author: Jake Diamond
+# Date: 18 January 2022
+# 
+library(car)
+library(leaps)
+library(lubridate)
+library(tidyverse)
 
+# Load sensor data
+df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
 
-
-ws <- readRDS("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/ws_land_use") %>%
+# Load watershed land use data
+ws <- readRDS(file.path("data", "08_GIS", "ws_land_use")) %>%
   mutate(site = tolower(site),
          area_lu_frac = units::drop_units(area_lu_frac)) %>%
   rename(ws_area_frac = area_lu_frac)
-buf <- readRDS("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/buffer_land_use_v2") %>%
+
+# Load buffer land use data
+buf <- readRDS(file.path("data", "08_GIS", "buffer_land_use_v2")) %>%
   mutate(area_lu_frac = units::drop_units(area_lu_frac)) %>%
   rename(buff_area_frac = area_lu_frac)
 
@@ -15,22 +28,21 @@ buf_mod <- filter(buf, buff_dists == 20) %>%
   select(site, plot_name, buff_area_frac, buff_dists) %>%
   pivot_wider(names_from = plot_name, values_from = buff_area_frac)
 
-
 # Load hydraulic data
 # Load geometry data
-df_k <- read_xlsx("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters/Headwaters/Data/hydraulic_data.xlsx") %>%
+df_k <- readxl::read_xlsx(file.path("data", "04_discharge and stage", "hydraulic_data.xlsx")) %>%
   select(Site = site, width = width_m, depth = depth_m, slope = slope_tnet) %>%
   mutate(site = tolower(Site)) %>%
   select(-Site)
 
 # Hypoxia summary
-df_h <- df_loire %>%
+df_h <- df %>%
   mutate(date = date(datetime),
          month = month(datetime),
          DOhyp = if_else(DO < 4, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
 
 # temperature and discharge summary
-df_tq <- df_loire %>%
+df_tq <- df %>%
   group_by(site) %>%
   dplyr::summarize(temp = median(DO_temp, na.rm = T))
 
@@ -55,7 +67,7 @@ df_hl <- df_h %>%
                    nw_f = mean(nw_f, na.rm = T),
                    Q50corr = mean(Q50_corr, na.rm = T),
                    strahler = mean(strahler, na.rm = T),
-                   slope = mean(slope, na.rm = T),
+                   # slope = mean(slope, na.rm = T),
                    SF = mean(SF, na.rm = T),
                    h = mean(h ,na.rm = T),
                    w = mean(w, na.rm = T),
@@ -67,10 +79,10 @@ df_hl <- df_h %>%
 df_hyp_mod <- df_h %>%
   group_by(site) %>%
   dplyr::summarize(DOhypn = round(sum(DOhyp, na.rm = T) / n() *100, 2),#percentage of time that is hypoxic
-            slope = mean(slope, na.rm = T),
+            # slope = mean(slope, na.rm = T),
             alt = mean(altitude_m, na.rm = T),
             area = mean(area_km2, na.rm = T),
-            L50corr = mean(L50_corr, na.rm = T),
+            # L50corr = mean(L50_corr, na.rm = T),
             H50corr = mean(H50_corr, na.rm = T),
             nw_b = mean(nw_b, na.rm = T),
             nw_f = mean(nw_f, na.rm = T),
@@ -93,7 +105,7 @@ df_hyp_mod <- df_h %>%
 #   ungroup()
 
 # Best subsets
-library(leaps)
+
 df_mod <- filter(df_hyp_mod, site != "coise aval vaudragon") %>%
   select(-site, -h, -w) %>%
   replace(is.na(.), 0) %>%
@@ -129,8 +141,6 @@ data.frame(
   BIC = which.min(res.sum2$bic)
 )
 
-#load car package
-library(car)
 mod2 <- lm(hypl ~ Q50corr + `irrigated agriculture` + urban, df_mod2)
 #produce added variable plots
 avPlots(mod2)

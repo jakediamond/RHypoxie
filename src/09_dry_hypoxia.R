@@ -4,10 +4,6 @@
 # Date: 18 January 2022
 # 
 
-# Set working directory
-setwd("Z:/RHypoxie")
-# setwd("C:/Users/diamo/Dropbox/Projects/RHypoxie")
-
 # Load libraries
 library(lubridate)
 library(readxl)
