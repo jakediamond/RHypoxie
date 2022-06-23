@@ -33,7 +33,6 @@ df <- df %>%
 # (Carter et al. 2021 uses 50%)
 
 # Some plotting info for the rest -----------------------------------------
-
 theme_second_axis <- theme_minimal() +
   theme(panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
         plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
@@ -116,7 +115,7 @@ p_monthly_q <- df %>%
 p_monthly_q
 
 p_month <- p_monthly_hyp + p_monthly_temp +
-  plot_layout(design = layout)
+  plot_layout(design = layout) + labs(tag = "a")
 p_month
 
 ggsave(plot = p_month,
@@ -168,20 +167,25 @@ p_num_events
 p_length_events <- ungroup(df_hyp) %>%
   group_by(site, hyp_pd) %>%
   filter(hyp_l == max(hyp_l)) %>%
+  ungroup() %>%
+  filter(between(hyp_l, quantile(hyp_l, 0.05), quantile(hyp_l, 0.95))) %>%
   ggplot(aes(x = month,
              y = hyp_l)) +
+  # geom_boxplot() +
+  # geom_violin() +
   stat_summary(color = "dark grey") +
   stat_summary(geom = "line", color = "dark grey") +
-  facet_grid(~year, space = "free", scales = "free_x") +
+  stat_summary(color = "transparent", fill = "transparent", geom = "bar") +
+  # facet_grid(~year, space = "free", scales = "free_x") +
   scale_y_continuous(position = "right") +
   theme_second_axis + 
   theme(axis.text = element_text(color = "dark grey"),
         axis.title = element_text(color = "dark grey")) + 
   labs(x = "month",
-       y = "mean length of hypoxic events (hours)")
-
+       y = "mean hypoxia duration (hours)")
+p_length_events
 p_events <- p_num_events + p_monthly_q + 
-  plot_layout(design = layout)
+  plot_layout(design = layout) + labs(tag = "b")
 p_events
 
 
@@ -207,7 +211,8 @@ p_hour <- df %>%
         panel.grid = element_blank(),
         legend.position = "none") +
   labs(y = "% of msmts. hypoxic",
-       x = "hour of day")
+       x = "hour of day",
+       tag = "c")
 
 # Monthly summary across all years ------------------------------------------------
 p_month_all <- df_hyp %>%
@@ -225,12 +230,38 @@ p_month_all <- df_hyp %>%
        x = "month")
 p_month_all
 
+p_hours_all <- p_month_all + p_length_events + plot_layout(design = layout) +
+  labs(tag = "d")
+p_hours_all
 
+
+p_month_min <- df %>%
+  group_by(site, date, month) %>%
+  summarize(min = min(DO, na.rm = T)) %>%
+  ungroup() %>%
+  filter(between(min, quantile(min, 0.05), quantile(min, 0.95))) %>%
+  ggplot(aes(x = month,
+             y = min,
+             group = month)) + 
+  geom_violin() +
+  # geom_boxplot() +
+  # geom_text(aes(x = 10, y = 0.18, label = sum(n), group = year)) +
+  # scale_y_continuous(breaks = seq(0, 7000, 1000)) +
+  scale_x_continuous(breaks = seq(min(df$month), max(df$month), 1)) +
+  theme_bw() +
+  theme(strip.background = element_blank(),
+        panel.grid = element_blank()) +
+  labs(y = "total hours of hypoxia",
+       x = "month")
+p_month_min
 # Graph of all summary data -----------------------------------------------
-p_all <- (p_month * theme(axis.text.x = element_blank(),
-                          axis.title.x = element_blank())/ 
-            (p_events * theme(strip.text.x = element_blank()))) / 
-  (p_hour + p_month_all)
+p_all <- ((p_month * theme(axis.text.x = element_blank(),
+                          axis.title.x = element_blank(),
+                          plot.tag.position = c(0.08, 0.8))/ 
+            (p_events * theme(strip.text.x = element_blank(),
+                              plot.tag.position = c(0.08, 0.95))))) / 
+  ((p_hour * theme(plot.tag.position = c(0.18, 0.95)) + 
+      p_hours_all * theme(plot.tag.position = c(0.18, 0.95))))
 p_all
 
 
