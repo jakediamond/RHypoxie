@@ -4,11 +4,6 @@
 # Date: November 1, 2020
 # 
 
-# Set working directory
-setwd("Z:/RHypoxie")
-# setwd("C:/Users/jake.diamond/Dropbox/Projects/RHypoxie")
-
-
 # Load libraries
 library(htmltools)
 library(plotly)
@@ -18,10 +13,7 @@ library(scales)
 library(tidyverse)
 
 # Load data
-df <- readRDS("Data/02_sensor_data/all_sensor_data_clean_wide.RDS")
-df_hour <- readRDS("Data/hourly_data.RDS")
-# Load some metadata
-meta <- read_xlsx("Data/01_metadata/site_area.xlsx")
+df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS"))
 
 # # Load point measurements
 # pts <- read_excel("Headwaters/Data/Field measurements/Field_data.xlsx") %>%
@@ -35,108 +27,10 @@ meta <- read_xlsx("Data/01_metadata/site_area.xlsx")
 #                              "Pot025",
 #                              site_code))
 # 
-# Read in all meteorological data
-meteo <- readRDS("Data/05_meteo/meteo_data.RDS")
-
-# Read in discharge data
-df_q <- readRDS("Data/04_discharge and stage/all_discharge_data_15min.RDS")
-
-# Load elevation data
-elev <- read_xlsx("Data/01_metadata/site_and_watershed_info.xlsx") %>%
-  select(site, elev_site = altitude_m)
-
-# Calculate %DO saturation and specific conductivity
-df <- df %>%
-  left_join(meteo) %>%
-  left_join(elev) %>%
-  mutate(tair_site = tair - 0.0098 * (elev_site - elev_ref)) %>% #air temp. at site; adiabatic dry lapse rate
-  mutate(press_e = p_mbar * exp((-0.03416262 / (tair_site + 273)) * 
-                                  (elev_site - elev_ref))) %>%  #pressure at site; -0.034 = -g*M/R
-  mutate(DOsat = streamMetabolizer::calc_DO_sat(DO_temp, press_e), #theoretical DO saturation based on garcia-benson eqn
-         DOsat2 = if_else(DO_temp == 0,
-                          0,
-                          14.652 - 0.41022 * DO_temp + 0.007991 *
-                            DO_temp^2 - 0.000077774 * DO_temp^3), #if pressure data is missing, estimate with this equation
-         DO_per = if_else(is.na(DOsat), # percentage saturation
-                          DO * 100 / DOsat2,
-                          DO * 100/ DOsat),
-         alpha = 0.0192+8E-5*cond_temp, # alpha constant for spc based on logger specs
-         spc = cond / (1 + alpha * (cond_temp - 25))) # calculate spc based on logger specs
-
-# Average data by hour 
-df_hour <- df %>%
-  mutate(hour = floor_date(datetime, "hour")) %>%
-  group_by(watershed, confluence, position, site, hour) %>%
-  summarize(across(where(is.numeric) & !rain_mm, mean, na.rm = TRUE),
-            rain_mm = sum(rain_mm, na.rm = T)) %>%
-  rename(datetime = hour) %>%
-  ungroup()
-
-# Plot top to bottom summary
-df_p <- left_join(df_hour, meta) %>%
-  mutate(date = date(datetime)) %>%
-  group_by(watershed, number, site, confluence, date) %>%
-  summarize(maxDO = max(DO, na.rm = T),
-            minDO = min(DO, na.rm = T),
-            maxper = max(DO_per, na.rm = T),
-            minper = min(DO_per, na.rm = T)) %>%
-  pivot_longer(maxDO:minper) %>%
-  mutate(value = na_if(value, Inf),
-         value = na_if(value, -Inf))
-
-ggplot(data = filter(df_p, name %in% c("maxDO", "minDO"), watershed == "yzeron"),
-       aes(x = date,
-           y = value,
-           color = name)) +
-  geom_line() +
-  theme_bw() +
-  scale_x_date(date_breaks = "1 month", date_labels = "%m") +
-  labs(y = "DO (mg/L)", x = "", title = "Yzeron") +
-  facet_wrap(~fct_reorder(site, number), ncol = 3) +
-  theme(legend.position = "none", axis.title.x = element_blank())
-ggsave("Figures/yzeron_timeseries_max_min_DO.png",
-       dpi = 600,
-       width = 18.2,
-       height = 24,
-       units = "cm")
-
-# All three confluence sites on the same panel
-ggplot(data = filter(df_hour, watershed == "ardieres"),
-       aes(x = datetime,
-           y = DO,
-           color = position)) +
-  geom_line(size = 0.6, alpha = 0.5) +
-  facet_wrap(~fct_reorder(confluence, -altitude_m), ncol = 1) +
-  scale_color_manual(values = c("purple", "red", "blue")) +
-  theme_bw() +
-  scale_x_datetime(date_breaks = "1 month", date_labels = "%m-%d", expand = c(0,0)) +
-  labs(y = "DO (mg/L)", x = "", title = "Ardières")
-ggsave("Figures/watershed_timeseries/ardieres_timeseries_confluence_DO.png",
-       dpi = 600,
-       width = 18.2,
-       height = 24,
-       units = "cm")
-
-# # Use threshold of daily temperature and %sat to see when out of water
-# df_oow <- df_hour %>%
-#   mutate(date = date(datetime)) %>%
-#   group_by(site,date) %>%
-#   summarize(do_mean = quantile(DO_per, 0.1, na.rm = TRUE),
-#             do_amp = max(DO_per, na.rm = T) - min(DO_per, na.rm = T),
-#             wat_t = max(DO_temp, na.rm = T) - min(DO_temp, na.rm = T)) %>%
-#   mutate(oow = if_else((do_mean > 90 & wat_t > 8) |
-#                          (do_mean > 90 & do_amp < 5), 
-#                        "yes", "no"))
-# 
-# # join this to dataframe
-# df_hour <- df_hour %>%
-#   mutate(date = date(datetime)) %>%
-#   left_join(select(df_oow, -q_mmd), 
-#             by = c("Site", "date"))
 
 # Interactive plotly graphs
 # First need to get nest data
-df_ply <- df_hour %>%
+df_ply <- df %>%
   # select(datetime, watershed, confluence, position, site, DO, DO_temp, 
   #        DO_per, cond, spc, lux_water, rain_mm, ) %>%
   arrange(watershed, confluence, position) %>%
@@ -286,6 +180,4 @@ p_q <- plot_ly() %>%
        xaxis = list(title = ""),
        yaxis = list(title = "Q (m3/s)"))
 p_q
-# Save the data
-savedata <- select(df_ply, site, data)
-saveRDS(df_hour, file = "Data/timeseries_data_hourly_new.RDS")
+

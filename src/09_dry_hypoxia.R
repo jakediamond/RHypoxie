@@ -11,25 +11,22 @@ library(scales)
 library(tidytext)
 library(tidyverse)
 library(lubridate)
-library(readxl)
-library(scales)
+
 # library(leaflet)
 # library(gtsummary)
 # library(sf)
 # library(qwraps2)
 # library(kableExtra)
-library(tidyverse)
 
 # Load data ---------------------------------------------------------------
-# Load old Loire data
-df_loire <- #readRDS("//LY-LHQ-SRV/jake.diamond/Loire_DO/Headwaters/Data/headwaters_data_clean") %>%
-  readRDS("Z:/RHypoxie/Data/headwaters_data_part2") %>%
+# Load old Loire data...only these sites experienced drying
+df_loire <- readRDS(file.path("data", "09_loire_data","loire_headwaters_data.RDS")) %>%
   unnest() %>%
   mutate(site_code = tolower(site_code)) %>%
-  left_join(read_xlsx("Z:/RHypoxie/Data/01_metadata/loire_headwaters_metadata.xlsx"))
+  left_join(read_xlsx(file.path("data", "01_metadata","loire_headwaters_metadata.xlsx")))
 
 # Discharge data
-df_q <- readRDS("Z:/RHypoxie/Data/discharge_plus_v2.RDS") %>%
+df_q <- readRDS(file.path("data", "09_loire_data","discharge_plus_v2.RDS")) %>%
   mutate(strahler = round(strahler))
 
 # join data
@@ -38,7 +35,7 @@ df_loire <- df_loire %>%
   left_join(df_q)
 
 # Load hypoxia metadata
-df_hyp <- read_xlsx("Z:/RHypoxie/Data/01_metadata/hypoxia_dates.xlsx")
+df_hyp <- read_xlsx(file.path("data", "01_metadata","hypoxia_dates.xlsx"))
 
 # Clean data for only drying hypoxia events and get times right
 dry_meta <- filter(df_hyp, type == "drying") %>%
@@ -58,8 +55,12 @@ df_dry <- ungroup(df_loire) %>%
                              match_fun = list(`==`, `>=`, `<=`))
 
 # Save the data for later use
-saveRDS(df_dry, "Z:/RHypoxie/Data/hypoxia_drying.RDS")
-df_dry <- readRDS(file.path("data" ,"hypoxia_drying.RDS"))
+saveRDS(df_dry, file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
+df_dry <- readRDS(file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
+
+
+# Metadata about pool and riffle ------------------------------------------
+meta_geom <- tibble(site = distinct())
 
 
 # Characterize the hypoxia ------------------------------------------------
@@ -68,7 +69,7 @@ df_dry_p <- df_dry %>%
   distinct() %>%
   group_by(site) %>%
   # filter(oow == "no" | is.na(oow)) %>%
-  mutate(DOhyp = if_else(DO <4, 1, 0),
+  mutate(DOhyp = if_else(DO < 3, 1, 0),
          year = year(datetime)) %>%
   mutate(group = cumsum(c(1, diff(datetime) > 1))) %>% # group by drying events
   group_by(site, group) %>%
@@ -89,7 +90,7 @@ c = ggplot() +
             alpha = 0.5)+
   geom_point(data = filter(df_dry_p, color == TRUE),
              aes(x = hour, y = DO, color = color)) +
-  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
   facet_wrap(~site, scales = "free_x")+
   scale_color_manual(values = "blue") +
   theme_bw() +

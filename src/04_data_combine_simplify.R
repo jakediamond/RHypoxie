@@ -71,13 +71,15 @@ df <- left_join(df, q_meta) %>%
 
 # Calculate discharge at each site
 df2 <- df %>%
-  mutate(q_mmh = q_m3s * 3.6 / area_q_km2,
-         qsite_m3s = q_mmh *area_km2 / 3.6)
+  mutate(q_int = imputeTS::na_kalman(q_m3s),
+         q_mmh = q_int * 3.6 / area_q_km2,
+         qsite_m3s = q_mmh *area_km2 / 3.6,
+         q_mmd = q_mmh * 24)
 
 # Save ardieres and yzeron data
-saveRDS(df2, "data/10_clean_data/hourly_data_2021.RDS")
+saveRDS(df2, file.path("data", "10_clean_data", "hourly_data_2021.RDS"))
 
-# Save ardieres and yzeron data
+# Bring in some meta data
 df2 <- readRDS(file.path("data", "10_clean_data", "hourly_data_2021.RDS")) %>%
   left_join(read_xlsx(file.path("data", "01_metadata", "site_area.xlsx")))
 
@@ -85,18 +87,39 @@ df2 <- readRDS(file.path("data", "10_clean_data", "hourly_data_2021.RDS")) %>%
 df_loire <- readRDS(file.path("data", "09_loire_data", "loire_headwaters_data.RDS")) %>%
   unnest() %>%
   mutate(site_code = tolower(site_code)) %>%
-  left_join(read_xlsx(file.path("data", "01_metadata", "loire_headwaters_metadata.xlsx")))
+  rename(lux_water = lux) %>%
+  left_join(read_xlsx(file.path("data", "01_metadata", "loire_headwaters_metadata.xlsx"))) %>%
+  left_join(read_xlsx(file.path("data", "05_meteo", "hourly_radiation_loire.xlsx")) %>%
+              select(datetime, rad = rad_jcm2)) %>%
+  mutate(rad_wm2 = rad *100^2/3600, #J/h/cm2 -> W/m2,
+         alpha = 0.0192+8E-5*DO_temp, # alpha constant for spc based on logger specs
+         spc = cond / (1 + alpha * (DO_temp - 25))) %>% # calculate spc based on logger specs)
+  drop_na(DO, DO_temp)
 
 # Combine data
-df_all <- bind_rows(df2, df_loire)
+df_all <- bind_rows(df2, df_loire) %>%
+  select(watershed, strahler, number, confluence, position, site_code, site, datetime,
+         DO, temp = DO_temp, DO_per, spc, rad_wm2, rain_mm, q_mmd)
+
+df_oow <- df_all %>%
+  mutate(date = date(datetime)) %>%
+  group_by(site_code, date) %>%
+  summarize(do_mean = quantile(DO_per, 0.1, na.rm = TRUE),
+            do_amp = max(DO_per, na.rm = T) - min(DO_per, na.rm = T),
+            wat_t = max(temp, na.rm = T) - min(temp, na.rm = T),
+            q_mmd = mean(q_mmd, na.rm = TRUE)) %>%
+  mutate(oow = if_else((do_mean > 90 & wat_t > 8 & (q_mmd < 0.1 | is.na(q_mmd)) & 
+                          between(month(date), 7, 10)) |
+                         (do_mean > 90 & do_amp < 5 & (q_mmd < 0.1 | is.na(q_mmd)) & 
+                            between(month(date), 7, 10)), 
+                       "yes", "no"))
 
 # Save
-saveRDS(df_all, "data/10_clean_data/hourly_data_all.RDS")
+saveRDS(df_all, file.path("data","10_clean_data", "hourly_data_all.RDS"))
 
 # Load daily discharge data
 df_q <- df2 %>%
-  mutate(date = date(datetime),
-         q_mmd = q_mmh * 24) %>%
+  mutate(date = date(datetime)) %>%
   select(-q_mmh) %>%
   distinct(siteq, q_mmd, date) %>%
   group_by(siteq, date) %>%
