@@ -10,7 +10,6 @@ library(readxl)
 library(scales)
 library(tidytext)
 library(tidyverse)
-library(lubridate)
 
 # library(leaflet)
 # library(gtsummary)
@@ -60,11 +59,11 @@ df_dry <- readRDS(file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
 
 
 # Metadata about pool and riffle ------------------------------------------
-meta_geom <- tibble(site = distinct())
+meta_geom <- readxl::read_excel("geomorphic_units.xlsx")
 
 
 # Characterize the hypoxia ------------------------------------------------
-# Hypoxia is < 4 mg/L
+# Hypoxia is < 3 mg/L
 df_dry_p <- df_dry %>%
   distinct() %>%
   group_by(site) %>%
@@ -85,31 +84,29 @@ df_dry_p <- df_dry %>%
 
 c = ggplot() +
   geom_line(data = df_dry_p,
-            aes(x = hour,
-                y = DO, group = gs),
+            aes(x = hourbef / 24,
+                y = DO_per, group = gs),
             alpha = 0.5)+
-  geom_point(data = filter(df_dry_p, color == TRUE),
-             aes(x = hour, y = DO, color = color)) +
-  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  facet_wrap(~site, scales = "free_x")+
+  # geom_point(data = filter(df_dry_p, color == TRUE),
+  #            aes(x = hour, y = DO, color = color)) +
+  # geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
+  # facet_wrap(~site, scales = "free_x")+
   scale_color_manual(values = "blue") +
   theme_bw() +
   theme(legend.position = "none")
 c
-ggsave(filename = "Z:/RHypoxie/Figures/drying_regression_slopevsint_per.png",
-       dpi = 1200,
-       height = 9.2,
-       width = 12,
-       units = "cm")
 
 
 # Caclulate regressions on DO minima
 df_m <- df_dry_p %>%
-  slice(which.min(DO)) %>%
+  group_by(gs, date) %>%
+  slice(which.min(DO_per)) %>%
   ungroup() %>%
-  group_by(site, group) %>%
+  select(site, group, hour, DO_per, DO, DO_temp) %>%
+  pivot_longer(cols = starts_with("DO")) %>%
+  group_by(site, group, name) %>%
   nest() %>%
-  mutate(mod = map(data, ~lm(DO~hour, data = .)),
+  mutate(mod = map(data, ~lm(value~hour, data = .)),
          t = map(mod, broom::tidy)) %>%
   select(t) %>%
   unnest(cols = t)
@@ -142,6 +139,24 @@ mean(df_m2$estimate_hour, na.rm = T) * 24.
 
 hist(df_m2$estimate_hour)
 
+# mean of results
+df_mean <- filter(df_m, term == "hour") %>%
+  group_by(name) %>%
+  summarize(mean = mean(estimate * 24, na.rm = T),
+            med = median(estimate * 24, na.rm = T))
+
+# density plot of ecosystem oxygen demand
+p_dens_per <- ggplot(data = filter(df_m, term == "hour", p.value < 0.05)) +
+  theme_bw(base_size = 11) +
+  geom_density(aes(x = estimate * 24)) + 
+  labs(x = expression("ecosystem oxygen demand (mg "*L^{-1}~d^{-1}*")"),
+       ) +
+  geom_vline(data = df_mean, aes(xintercept = mean, group = name)) + 
+  geom_vline(data = df_mean, aes(xintercept = med, group = name), linetype = "dashed") +
+  facet_wrap(~name, scales = "free_x")
+
+p_dens_per
+
 
 
 
@@ -156,10 +171,12 @@ df_aug <- df_aug %>%
          !(site == "Carrat" & date > ymd("20200715")),
          !(site == "Moulin Piquet la Rapine" & date > ymd("20200714")))
 
-ggplot() +
-  geom_line(data = df_dry_p,
-            aes(x = hourbef,
-                y = DO, group = gs),
+df_dry_p %>%
+  left_join(meta_geom, by = "site_code") %>%
+  ggplot() +
+  geom_line(aes(x = hourbef,
+                y = DO, group = gs,
+                color = geomorph),
             alpha = 0.5)+
   # geom_point(data = filter(df_dry_p, color == TRUE),
   # aes(x = hourbef, y = DO, color = color)) +
@@ -168,11 +185,11 @@ ggplot() +
   #             method = "lm", se = FALSE) +
   # ggpubr::stat_regline_equation(data = filter(df_dry_p, color == TRUE),
   #                               aes(x = hour, y = DO, group = gs)) +
-  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
-  facet_wrap(~site)+
+  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
+  facet_wrap(~site_code)+
   scale_x_continuous(breaks = seq(-24*10, 0, 48),
                      limits = c(-240, 0)) +
-  scale_color_manual(values = "blue") +
+  # scale_color_manual(values = "blue") +
   theme_bw() +
   theme(legend.position = "none") +
   labs(title = "drying patterns leading to hypoxia",
@@ -229,9 +246,10 @@ df_h <- df_dry_p %>%
   unnest(cols = t)
 
 df_h2 <- df_h %>%
+  filter((term == "hour" & p.value < 0.05 )) %>%
   pivot_wider(names_from = term, values_from = estimate:p.value) %>%
-  select(hint = `estimate_(Intercept)`, hslope = estimate_hour)
-
+  select(hslope = estimate_hour)
+# hint = `estimate_(Intercept)`, 
 
 df_comp <- left_join(df_m2, df_h2)
 
