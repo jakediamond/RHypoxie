@@ -24,11 +24,12 @@ meteo <- select(meteo, -p_mbar, -elev_ref) %>%
   mutate(elev_ref = 0)
 
 # Read in discharge data
-q <- readRDS("Data/04_discharge and stage/all_discharge_data_15min.RDS") %>%
+q <- readRDS(file.path("data", "04_discharge and stage", "hourly_discharge_all.RDS")) %>%
   mutate(datetime = with_tz(datetime, "Europe/Berlin"))
 
 # Load discharge meta data to be able to extrapolate discharge to all sites
-q_meta <- read_xlsx("Data/01_metadata/site_area.xlsx")
+q_meta <- read_xlsx(file.path("data", "01_metadata", "site_meta_data_all.xlsx")) %>%
+  select(site, area_km2, siteq, area_q_km2)
 
 # Get to hourly data to simplify
 sens_hour <- sens %>%
@@ -65,23 +66,13 @@ df <- sens_hour %>%
          alpha = 0.0192+8E-5*cond_temp, # alpha constant for spc based on logger specs
          spc = cond / (1 + alpha * (cond_temp - 25))) # calculate spc based on logger specs
 
-# Combine with discharge
-df <- left_join(df, q_meta) %>%
-  left_join(q)
-
-# Calculate discharge at each site
-df2 <- df %>%
-  mutate(q_int = imputeTS::na_kalman(q_m3s),
-         q_mmh = q_int * 3.6 / area_q_km2,
-         qsite_m3s = q_mmh *area_km2 / 3.6,
-         q_mmd = q_mmh * 24)
-
 # Save ardieres and yzeron data
-saveRDS(df2, file.path("data", "10_clean_data", "hourly_data_2021.RDS"))
+saveRDS(df, file.path("data", "10_clean_data", "hourly_data_2021.RDS"))
 
 # Bring in some meta data
 df2 <- readRDS(file.path("data", "10_clean_data", "hourly_data_2021.RDS")) %>%
-  left_join(read_xlsx(file.path("data", "01_metadata", "site_area.xlsx")))
+  left_join(read_xlsx(file.path("data", "01_metadata", "site_meta_data_all.xlsx")) %>%
+              select(site, site_code, strahler, area_km2))
 
 # Load old Loire data
 df_loire <- readRDS(file.path("data", "09_loire_data", "loire_headwaters_data.RDS")) %>%
@@ -98,39 +89,77 @@ df_loire <- readRDS(file.path("data", "09_loire_data", "loire_headwaters_data.RD
 
 # Combine data
 df_all <- bind_rows(df2, df_loire) %>%
-  select(watershed, strahler, number, confluence, position, site_code, site, datetime,
-         DO, temp = DO_temp, DO_per, spc, rad_wm2, rain_mm, q_mmd)
+  select(watershed, strahler, area_km2, latitude, longitude, altitude_m,
+         number, confluence, position, site_code, site, datetime,
+         DO, temp = DO_temp, DO_per, spc, rad_wm2, lux = lux_water, rain_mm, tair)
 
-df_oow <- df_all %>%
+# Combine with discharge
+df_all <- left_join(df_all, q_meta) %>%
+  arrange(site, datetime) %>%
+  mutate(year = year(datetime),
+         date = date(datetime)) %>%
+  mutate(siteq = if_else(site == "lignon aval poncins" & year == 2019,
+                         "lignon_amont_boen",
+                         siteq)) %>% #missing data for this year
+  left_join(q)
+
+
+# Calculate discharge at each site
+df_all2 <- df_all %>%
+  group_by(site, year) %>%
+  mutate(q_int = imputeTS::na_kalman(q_m3s), #fill in gaps
+         q_mmh = q_int * 3.6 / area_q_km2, # m3S to mm/h
+         qsite_m3s = q_mmh *area_km2 / 3.6, # estimated discharge at each sensor
+         q_mmd = q_mmh * 24) %>% # mm/h to mm/d
+  ungroup()
+
+# Determine if the sensor was out of water
+df_oow <- df_all2 %>%
   mutate(date = date(datetime)) %>%
   group_by(site_code, date) %>%
   summarize(do_mean = quantile(DO_per, 0.1, na.rm = TRUE),
             do_amp = max(DO_per, na.rm = T) - min(DO_per, na.rm = T),
             wat_t = max(temp, na.rm = T) - min(temp, na.rm = T),
+            air_t = max(tair, na.rm = T) - min(tair, na.rm = T),
             q_mmd = mean(q_mmd, na.rm = TRUE)) %>%
-  mutate(oow = if_else((do_mean > 90 & wat_t > 8 & (q_mmd < 0.1 | is.na(q_mmd)) & 
+  mutate(oow = if_else((do_mean > 90 & wat_t > 8 & (q_mmd < 0.05 | is.na(q_mmd)) & 
                           between(month(date), 7, 10)) |
-                         (do_mean > 90 & do_amp < 5 & (q_mmd < 0.1 | is.na(q_mmd)) & 
-                            between(month(date), 7, 10)), 
+                         (do_mean > 90 & do_amp < 5 & (q_mmd < 0.05 | is.na(q_mmd)) & 
+                            between(month(date), 7, 10)) |
+                         (do_mean > 90 & wat_t >= air_t & (q_mmd < 0.05 | is.na(q_mmd)) & 
+                            between(month(date), 7, 10)) |
+                         (site_code == "rie009" & between(date, ymd("20200416"), ymd("20200515"))), 
                        "yes", "no"))
 
-# Save
-saveRDS(df_all, file.path("data","10_clean_data", "hourly_data_all.RDS"))
+# Include oow data into data frame
+df_final <- df_all2 %>%
+  mutate(month = month(datetime)) %>%
+  left_join(select(df_oow, site_code, date, oow)) %>%
+  mutate(oow = if_else(!is.na(spc) & DO_per > 95 & spc < 50, 
+                                "yes",
+                                oow))
 
-# Load daily discharge data
+# Save
+saveRDS(df_final, file.path("data","10_clean_data", "hourly_data_all.RDS"))
+
+# Get a dataframe of daily discharge data
 df_q <- df2 %>%
   mutate(date = date(datetime)) %>%
   select(-q_mmh) %>%
   distinct(siteq, q_mmd, date) %>%
   group_by(siteq, date) %>%
-  summarize(across(where(is.numeric), mean, na.rm = T)) %>%
-  bind_rows(mutate(df_loire, date = date(datetime),
+  summarize(across(where(is.numeric), mean, na.rm = T)) %>% # summarize hourly to daily
+  bind_rows(mutate(df_loire, date = date(datetime), #add loire discharge
                    watershed = case_when(site_code == "lig664" ~ "lignon aval poncins", 
                                          site_code == "lig426" ~ "lignon amont boen",
                                          site_code == "viz062" ~ "vizezy poncins",
                                          site_code == "viz221" ~ "vizezy poncins",
                                          TRUE ~ watershed)) %>%
               select(siteq =watershed, date, q_mmd) %>%
-              distinct) %>%
+              distinct() %>%
+              group_by(siteq, date) %>%
+              summarize(across(where(is.numeric), mean, na.rm = T))) %>%
   filter(siteq != "Loise") #doubled from Coise
-distinct(df_q, site_code)
+
+# Save this data
+saveRDS(df_q, file.path("data","10_clean_data", "daily_discharge.RDS"))

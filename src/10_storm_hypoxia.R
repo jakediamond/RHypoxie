@@ -13,6 +13,13 @@ library(tidyverse)
 # Load all cleaned sensor data
 df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
 
+# Load storm starts and lengths
+storm_meta <- readRDS(file.path("data", "10_clean_data","storm_starts_lengths.RDS")) %>%
+  filter(year < 2022,
+         between(month(start.date), 3, 10)) %>%
+  ungroup()
+
+
 # Load hypoxia metadata
 df_hyp <- read_xlsx("Z:/RHypoxie/Data/01_metadata/hypoxia_dates.xlsx")
 
@@ -91,9 +98,11 @@ ggplot(data = filter(df, site == "ruisseau de violay",
 
 
 # Event look along network ------------------------------------------------
-plot_fun <- function(startdate, enddate) {
+plot_fun <- function(startdate, stormlength) {
   df_event = df %>%
-    filter(between(date, ymd(startdate), ymd(enddate))) %>%
+    filter(between(datetime, 
+                   startdate - hours(24*2), 
+                   startdate + hours(stormlength))) %>%
     # filter(!(site %in% c("ardevel amont vernus",
     #                      "vernus",
     #                      "ardevel aval vernus",
@@ -145,9 +154,9 @@ plot_fun <- function(startdate, enddate) {
     theme_bw() +
     theme(axis.title.x = element_blank())
   
-  b1 = ggplot(data = distinct(df_event, watershed, site, datetime, q_mmh),
+  b1 = ggplot(data = distinct(df_event, watershed, site, datetime, q_mmd),
                aes(x = datetime,
-                   y = q_mmh,
+                   y = q_mmd,
                    group = site)) +
     geom_line(color = "blue") +
     scale_y_continuous(position = "right") +
@@ -205,7 +214,9 @@ plot_fun <- function(startdate, enddate) {
   }
 }
 
-plot_fun("20210420", "20210505")
+plot_fun(storm_meta$start.date[1], storm_meta$spell.length[1])
+
+
 ggsave(filename = "Figures/storm_event_examples/20210622.png",
        dpi = 1200,
        width = 22,

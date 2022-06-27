@@ -39,18 +39,18 @@ df_ply <- df %>%
   nest()
 
 # Create a graphing function
-graph_fun <- function(data, y1 = "DO", y2 = "DO_temp", site = "sitename") {
+graph_fun <- function(data, y1 = "DO", y2 = "temp", site = "sitename") {
   
   p_y1 <- parse(text = y1)
   p_y2 <- parse(text = y2)
   
   # Have to put NAs so that it doesn't connect gapped observations
   data = arrange(data, datetime) %>%
-    select(datetime, {{ y1 }}, {{ y2 }})#, oow)
-  # data_oow = distinct(data, datetime) %>%
-  #   left_join(filter(data, oow == "yes"))
-  # data_inw = distinct(data, datetime) %>%
-  #   left_join(filter(data, oow == "no"))
+    select(datetime, {{ y1 }}, {{ y2 }}, oow)
+  data_oow = distinct(data, datetime) %>%
+    left_join(filter(data, oow == "yes"))
+  data_inw = distinct(data, datetime) %>%
+    left_join(filter(data, oow == "no"))
   
   # # Subset the points dataframe for the site
   # pts_site = filter(pts, site_code == site) %>%
@@ -62,21 +62,21 @@ graph_fun <- function(data, y1 = "DO", y2 = "DO_temp", site = "sitename") {
                    "DO_per" = "DO (% sat.)",
                    "cond" = "conductivity (uS/cm)",
                    "spc" = "specific conductance (uS/cm)",
-                   "lux_water" = "lux (lumens/m2)",
-                   "q_mmh" = "specific discharge (mm/h)",
+                   "lux" = "lux (lumens/m2)",
+                   "q_mmd" = "specific discharge (mm/d)",
                    "qsite_m3s" = "Q (m3/s)",
                    "rain_mm" = "rainfall (mm/hr)",
                    "rad_Wm2" = "insolation (W/m2)")
   
   yaxis_2 = switch(y2,
-                   "DO_temp" = "temp. (deg C)",
+                   "temp" = "temp. (deg C)",
                    "DO_per" = "DO (% sat.)",
                    "cond" = "conductivity (uS/cm)",
                    "spc" = "specific conductance (uS/cm)",
                    "DOd" = "DO x depth (g/m2)",
                    "DO" = "DO (mg/L)",
-                   "lux_water" = "lux (lumens/m2)",
-                   "q_mmh" = "specific discharge (mm/h)",
+                   "lux" = "lux (lumens/m2)",
+                   "q_mmd" = "specific discharge (mm/d)",
                    "qsite_m3s" = "Q (m3/s)",
                    "rain_mm" = "rainfall (mm/hr)",
                    "rad_Wm2" = "insolation (W/m2)")
@@ -88,33 +88,33 @@ graph_fun <- function(data, y1 = "DO", y2 = "DO_temp", site = "sitename") {
            "DO_per" = c(0,150),
            "cond" = c(0,1500),
            "spc" = c(0, 1500),
-           "lux_water" = c(0, 1500),
-           "q_mmh" = c(0, 5),
+           "lux" = c(0, 1500),
+           "q_mmd" = c(0, 5),
            "qsite_m3s" = c(0, 50),
            "rain_mm" = c(0, 5),
            "rad_Wm2" = c(0, 1500)
            )
   
   plot_ly() %>%
-    add_trace(data = data,#data_inw,
+    add_trace(data = data_inw,
               x=~datetime, y=~eval(p_y1), type = "scatter", mode='lines',
               color = I("black"), linetype = I("solid"),
               showlegend = FALSE) %>%
-    # add_trace(data = data_oow,
-    #           x=~datetime, y=~eval(p_y1), type = "scatter", mode='lines',
-    #           color = I("darkgrey"), linetype = I("dot"),
-    #           showlegend = FALSE) %>%
-    add_trace(data = data,#data_inw,
+    add_trace(data = data_oow,
+              x=~datetime, y=~eval(p_y1), type = "scatter", mode='lines',
+              color = I("darkgrey"), linetype = I("dot"),
+              showlegend = FALSE) %>%
+    add_trace(data = data_inw,
               x=~datetime, y=~eval(p_y2), type = "scatter", 
               mode=if(y2=="rain_mm"){'bars'}else{'lines'},
               color = I("red"), linetype = I("solid"),
               yaxis="y2",
               showlegend = FALSE) %>%
-    # add_trace(data = data_oow,
-    #           x=~datetime, y=~eval(p_y2), type = "scatter", mode='lines',
-    #           color = I("tomato"), linetype = I("dot"),
-    #           yaxis="y2",
-    #           showlegend = FALSE) %>%
+    add_trace(data = data_oow,
+              x=~datetime, y=~eval(p_y2), type = "scatter", mode='lines',
+              color = I("tomato"), linetype = I("dot"),
+              yaxis="y2",
+              showlegend = FALSE) %>%
     # add_trace(data = pts_site,
     #           color = I("black"),
     #           x=~Datetime, y=~eval(p_y1), type = "scatter", mode = 'markers',
@@ -142,13 +142,13 @@ graph_fun <- function(data, y1 = "DO", y2 = "DO_temp", site = "sitename") {
 df_ply <- df_ply %>%
   mutate(p_do_temp = pmap(list(data, site = site),
                           graph_fun),
-         p_doper_lux = pmap(list(data, "DO_per", "lux_water", site),
+         p_doper_lux = pmap(list(data, "DO_per", "lux", site),
                             graph_fun),
-         p_spc_dis = pmap(list(data, "spc", "q_m3s", site),
+         p_spc_dis = pmap(list(data, "spc", "q_mmd", site),
                            graph_fun),
-         p_dis_rain = pmap(list(data, "q_mmh", "rain_mm", site),
+         p_dis_rain = pmap(list(data, "DO_per", "q_mmd", site),
                            graph_fun),
-         p_cond_dis = pmap(list(data, "DO", "q_mmh", site),
+         p_cond_dis = pmap(list(data, "DO", "q_mmd", site),
                            graph_fun))
 # Check out the graphs
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 4)))
@@ -158,26 +158,26 @@ htmltools::browsable(htmltools::tagList(pluck(df_ply, 7)))
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 8)))
 
 
-df_q <- distinct(df_hour, datetime, rain_mm, Q_grez, Q_rat, Q_char) %>%
-  pivot_longer(cols = starts_with("Q")) %>%
-  arrange(datetime)
-p_q <- plot_ly() %>%
-  add_trace(data = df_q,
-            x=~datetime, y=~value, type = "scatter", mode='lines',
-            color = ~name, linetype = I("solid"),
-            showlegend = FALSE) %>%
-  add_trace(data = df_q,
-            x=~datetime, y=~rain_mm, type = "scatter", 
-            mode = "lines",
-            color = I("black"), linetype = I("solid"),
-            yaxis="y2",
-            showlegend = FALSE) %>%
-  layout(yaxis2 = list(overlaying = "y", side = "right",
-                     title = "rainfall (mm/h)",
-                     tickfont = list(color = "black"),
-                     titlefont = list(color = "black"),
-                     autorange = "reversed"),
-       xaxis = list(title = ""),
-       yaxis = list(title = "Q (m3/s)"))
-p_q
-
+# df_q <- distinct(df_hour, datetime, rain_mm, Q_grez, Q_rat, Q_char) %>%
+#   pivot_longer(cols = starts_with("Q")) %>%
+#   arrange(datetime)
+# p_q <- plot_ly() %>%
+#   add_trace(data = df_q,
+#             x=~datetime, y=~value, type = "scatter", mode='lines',
+#             color = ~name, linetype = I("solid"),
+#             showlegend = FALSE) %>%
+#   add_trace(data = df_q,
+#             x=~datetime, y=~rain_mm, type = "scatter", 
+#             mode = "lines",
+#             color = I("black"), linetype = I("solid"),
+#             yaxis="y2",
+#             showlegend = FALSE) %>%
+#   layout(yaxis2 = list(overlaying = "y", side = "right",
+#                      title = "rainfall (mm/h)",
+#                      tickfont = list(color = "black"),
+#                      titlefont = list(color = "black"),
+#                      autorange = "reversed"),
+#        xaxis = list(title = ""),
+#        yaxis = list(title = "Q (m3/s)"))
+# p_q
+# 

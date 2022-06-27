@@ -123,3 +123,26 @@ list_of_dfs %>%
 
 list_of_dfs %>%
   writexl::write_xlsx(path = "Data/04_discharge and stage/all_discharge_data_15min.xlsx")
+
+
+# Combine all discharge data into hourly format ---------------------------
+# Load data
+dfqrhone <- readRDS(file.path("data", "04_discharge and stage", "all_discharge_data_15min.RDS"))
+dfqloire <- readRDS(file.path("data", "04_discharge and stage", "hourly_discharge_loire.RDS"))
+
+# Join data
+dfrhone_hr <- dfqrhone %>%
+  mutate(hour = floor_date(datetime, "hour")) %>%
+  group_by(siteq, hour) %>%
+  summarize(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  rename(datetime = hour) %>%
+  ungroup()
+
+dfq_final <- select(dfqloire, siteq = site_q, datetime, q_m3s) %>%
+  bind_rows(dfrhone_hr) %>%
+  mutate(siteq = str_replace_all(siteq, " ", "_"),
+         siteq = tolower(siteq))
+
+saveRDS(dfq_final, 
+        file.path("data", "04_discharge and stage", "hourly_discharge_all.RDS"))
+distinct(dfq_final, siteq)
