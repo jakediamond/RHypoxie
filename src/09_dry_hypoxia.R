@@ -11,55 +11,56 @@ library(scales)
 library(tidytext)
 library(tidyverse)
 
-# library(leaflet)
-# library(gtsummary)
-# library(sf)
-# library(qwraps2)
-# library(kableExtra)
-
 # Load data ---------------------------------------------------------------
-# Load old Loire data...only these sites experienced drying
-df_loire <- readRDS(file.path("data", "09_loire_data","loire_headwaters_data.RDS")) %>%
-  unnest() %>%
-  mutate(site_code = tolower(site_code)) %>%
-  left_join(read_xlsx(file.path("data", "01_metadata","loire_headwaters_metadata.xlsx")))
+# Load sensor data
+df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
 
-# Discharge data
-df_q <- readRDS(file.path("data", "09_loire_data","discharge_plus_v2.RDS")) %>%
-  mutate(strahler = round(strahler))
+# Load drying start dates and length
+meta_dry <- readRDS(file.path("data", "10_clean_data","drying_starts_lengths.RDS")) %>%
+  ungroup()
 
-# join data
-df_loire <- df_loire %>%
-  mutate(date = date(datetime)) %>%
-  left_join(df_q)
+# Load metadata about pool and riffle
+meta_geom <- readxl::read_excel(file.path("data", "07_geomorphology","geomorphic_units.xlsx"))
 
-# Load hypoxia metadata
-df_hyp <- read_xlsx(file.path("data", "01_metadata","hypoxia_dates.xlsx"))
-
+# Subset the sensor data for drying periods
 # Clean data for only drying hypoxia events and get times right
-dry_meta <- filter(df_hyp, type == "drying") %>%
-  mutate(start = lubridate::force_tz(start, tzone = "Europe/Berlin"),
-         end = lubridate::force_tz(end, tzone = "Europe/Berlin"),
-         recovery_start = lubridate::force_tz(recovery_start, tzone = "Europe/Berlin"),
-         recovery_end = lubridate::force_tz(recovery_end, tzone = "Europe/Berlin"))
+meta_dry <- meta_dry %>%
+  mutate(start = with_tz(start.date, tzone = "Europe/Berlin"),
+         end = force_tz(start, tzone = "Europe/Berlin") + hours(spell.length))
 
 # Only get the data for the drying hypoxia events
-df_dry <- ungroup(df_loire) %>%
+df_dry <- ungroup(df) %>%
   select(-position, -number, -confluence) %>%
   distinct() %>%
-  fuzzyjoin::fuzzy_semi_join(dry_meta,
-                             by = c("site_code" = "site_code",
+  fuzzyjoin::fuzzy_semi_join(meta_dry,
+                             by = c("siteq" = "siteq",
                                     "datetime" = "start",
                                     "datetime" = "end"),
                              match_fun = list(`==`, `>=`, `<=`))
 
 # Save the data for later use
-saveRDS(df_dry, file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
+saveRDS(df_dry, file.path("data", "10_clean_data", "hypoxia_drying_new.RDS"))
 df_dry <- readRDS(file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
 
+# Plotting theme ----------------------------------------------------------
+# theme for discharge plots
+p_theme_q <- 
+  theme_minimal() +
+  theme(panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
+        plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
+        panel.grid.major = element_blank(), #remove major gridlines
+        panel.grid.minor = element_blank(), #remove minor gridlines
+        legend.background = element_rect(fill='transparent'), #transparent legend bg
+        legend.box.background = element_rect(fill='transparent'),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) #transparent legend panel)
 
-# Metadata about pool and riffle ------------------------------------------
-meta_geom <- readxl::read_excel("geomorphic_units.xlsx")
+layout <- c(
+  area(t = 1, l = 1, b = 8, r = 4),
+  area(t = 6, l = 1, b = 8, r = 4)
+)
 
 
 # Characterize the hypoxia ------------------------------------------------
@@ -72,6 +73,7 @@ df_dry_p <- df_dry %>%
          year = year(datetime)) %>%
   mutate(group = cumsum(c(1, diff(datetime) > 1))) %>% # group by drying events
   group_by(site, group) %>%
+  filter(oow == "no" | is.na(oow)) %>%
   mutate(hour = row_number() - 1) %>%
   group_by(site, date, group) %>%
   mutate(color = min(DO) == DO, 
@@ -79,24 +81,65 @@ df_dry_p <- df_dry %>%
          gs = paste(group, site)) %>%
   ungroup() %>%
   group_by(gs) %>%
-  mutate(hourbef = hour - max(hour))
+  mutate(hourbef = hour - max(hour)) %>%
+  filter(sum(DOhyp) > 1)
 
-
-c = ggplot() +
-  geom_line(data = df_dry_p,
-            aes(x = hourbef / 24,
-                y = DO_per, group = gs),
-            alpha = 0.5)+
+# Plot of time series
+p_ts_dry <- ggplot() +
+  geom_line(data = filter(df_dry_p, year == 2020, datetime > ymd_h(2020071700),
+                          !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
+                          !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
+            aes(x = datetime,
+                y = DO, group = gs,
+                color = log(area_km2))) +
   # geom_point(data = filter(df_dry_p, color == TRUE),
   #            aes(x = hour, y = DO, color = color)) +
   # geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  # facet_wrap(~site, scales = "free_x")+
-  scale_color_manual(values = "blue") +
+  facet_grid(~month(datetime), scales = "free_x", space = "free")+
+  scale_color_viridis_c() +
+  # scale_color_manual(values = "blue") +
   theme_bw() +
-  theme(legend.position = "none")
-c
+  theme(legend.position = "bottom", legend.direction = "horizontal",
+        strip.background = element_blank(), strip.text = element_blank(),
+        axis.title.x = element_blank())
+p_ts_dry
 
+p_ts_dry_q <- ggplot() +
+  geom_line(data = filter(df, year == 2020, datetime > ymd_h(2020071700),
+                          siteq == "toranche_st_cyr_les_vignes",
+                          # siteq == "coise_le_nezel",
+                          datetime < ymd_h(2020092100),
+                          !between(datetime, ymd_h(2020083100), ymd_h(2020090300)),
+                          !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
+                          !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
+            aes(x = datetime,
+                y = q_mmd,
+                group = siteq),
+            color = "blue") +
+  p_theme_q +
+  labs(y = expression("q (mm "*d^{-1}*")")) +
+  scale_y_continuous(position = "right", limits = c(0,0.5)) +
+  # geom_point(data = filter(df_dry_p, color == TRUE),
+  #            aes(x = hour, y = DO, color = color)) +
+  # geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
+  facet_grid(~month(datetime), scales = "free_x", space = "free")+
+  scale_color_manual(values = "blue") +
+  theme(strip.background = element_blank(), strip.text = element_blank(),
+        axis.text.y = element_text(color = "blue"),
+        axis.title.y = element_text(color = "blue"))
+p_ts_dry_q
 
+p_ts_dry_all <- p_ts_dry + p_ts_dry_q +
+  plot_layout(design = layout)
+p_ts_dry_all
+ggsave(plot = p_ts_dry_all,
+       filename = file.path("results", "Figures", "drying_summaries", "drying_ex_ts.png"),
+       dpi = 1200,
+       units = "cm",
+       width = 18.4,
+       height = 12)
+
+# Regressions -------------------------------------------------------------
 # Caclulate regressions on DO minima
 df_m <- df_dry_p %>%
   group_by(gs, date) %>%
@@ -114,16 +157,53 @@ df_m <- df_dry_p %>%
 df_m2 <- df_m %>%
   pivot_wider(names_from = term, values_from = estimate:p.value)
 
-ggplot(data = df_m2, #filter(df_m2, `estimate_(Intercept)` > 2.5),
+p_hist_droprates <- df_m2 %>%
+  filter(name == "DO") %>%
+  ggplot(aes(x = -estimate_hour * 24)) +
+  geom_density(fill = "red", alpha = 0.5) +
+  theme_bw() +
+  geom_vline(aes(xintercept = median(-estimate_hour * 24, na.rm = T))) +
+  labs(x = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"))
+p_hist_droprates
+  
+
+ggsave(plot = p_hist_droprates, 
+       filename = file.path("results", "Figures", "drying_summaries", "dry_droprate_hist.png"),
+       dpi = 1200,
+       height = 9.2,
+       width = 9.2,
+       units = "cm")
+
+p_test <- df_m2 %>%
+  left_join(distinct(select(df, site, site_code))) %>%
+  left_join(meta_geom, by = "site_code") %>%
+  filter(name == "DO") %>%
+  ggplot(aes(x = geomorph,
+             y = -estimate_hour * 24)) +
+  stat_summary() + 
+  # geom_density(fill = "red", alpha = 0.5) +
+  theme_bw() +
+  # geom_vline(aes(xintercept = median(-estimate_hour * 24, na.rm = T))) +
+  labs(y = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"))
+p_test
+
+ggsave(plot = p_test, 
+       filename = file.path("results", "Figures", "drying_summaries", "dry_droprate_geomorph.png"),
+       dpi = 1200,
+       height = 9.2,
+       width = 9.2,
+       units = "cm")
+
+ggplot(data = filter(df_m2, name == "DO"),
        aes(x = `estimate_(Intercept)`,
             y = estimate_hour)) +
   # facet_wrap(~site) +
   geom_point() +
   theme_bw() +
   stat_smooth(method = "lm") +
-  ggpubr::stat_regline_equation() +
-  ggpubr::stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
-                    label.y = -0.1) +
+  # ggpubr::stat_regline_equation() +
+  # ggpubr::stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep = "*`,`~")),
+  #                   label.y = -2) +
   theme(legend.position = "none") +
   labs(title = "relationship between slope and intercept (%)",
        x = "drying regression intercept",
@@ -216,20 +296,20 @@ df_th <- df_dry_p %>%
             select(DO_start = DO))
 
 
-ggplot(data = df_th,
-       aes(x = DO_start,
-           y = hour)) +
-  geom_point() +
+p_hist_dry_timhyp <- ggplot(data = df_th,
+       aes(x = hour / 24)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  geom_vline(aes(xintercept = median(hour / 24, na.rm = T))) +
+  # geom_point() +
   theme_bw() +
   # geom_abline(intercept = 0, slope = 24) +
-  labs(title = "time until first instance of hypoxia under drying",
-       y = "time until hypoxia (hours)",
-       x = "starting DO (mg/L)")
+  labs(x = "time until hypoxia (days)")
 
-ggsave(filename = "Z:/RHypoxie/Figures/drying_time_until_hypoxia.png",
+ggsave(plot = p_hist_dry_timhyp,
+       filename = file.path("results", "Figures", "drying_summaries", "time_to_hyp_hist.png"),
        dpi = 1200,
        height = 9.2,
-       width = 12,
+       width = 9.2,
        units = "cm")
 
 
@@ -379,113 +459,29 @@ ggsave(filename = "Z:/RHypoxie/Figures/rewetting_hypoxia_mgl.png",
 
 
 
+# # Old ---------------------------------------------------------------------
+# 
+# # Load hypoxia metadata
+# df_hyp <- read_xlsx(file.path("data", "01_metadata","hypoxia_dates.xlsx"))
+# 
+# # Clean data for only drying hypoxia events and get times right
+# dry_meta <- filter(df_hyp, type == "drying") %>%
+#   mutate(start = lubridate::force_tz(start, tzone = "Europe/Berlin"),
+#          end = lubridate::force_tz(end, tzone = "Europe/Berlin"),
+#          recovery_start = lubridate::force_tz(recovery_start, tzone = "Europe/Berlin"),
+#          recovery_end = lubridate::force_tz(recovery_end, tzone = "Europe/Berlin"))
+# 
+# # Only get the data for the drying hypoxia events
+# df_dry <- ungroup(df_loire) %>%
+#   select(-position, -number, -confluence) %>%
+#   distinct() %>%
+#   fuzzyjoin::fuzzy_semi_join(dry_meta,
+#                              by = c("site_code" = "site_code",
+#                                     "datetime" = "start",
+#                                     "datetime" = "end"),
+#                              match_fun = list(`==`, `>=`, `<=`))
+# 
+# # Save the data for later use
+# saveRDS(df_dry, file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
+# df_dry <- readRDS(file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
 
-# Storms ------------------------------------------------------------------
-
-
-st_meta = filter(df_hyp, type == "storm_down") %>%
-  mutate(start = lubridate::force_tz(start, tzone = "Europe/Berlin"),
-         end = lubridate::force_tz(end, tzone = "Europe/Berlin"),
-         recovery_start = lubridate::force_tz(recovery_start, tzone = "Europe/Berlin"),
-         recovery_end = lubridate::force_tz(recovery_end, tzone = "Europe/Berlin"))
-
-df_st <- ungroup(df_loire) %>%
-  select(-position, -number, -confluence) %>%
-  distinct() %>%
-  fuzzyjoin::fuzzy_semi_join(st_meta,
-                             by = c("site_code" = "site_code",
-                                    "datetime" = "start",
-                                    "datetime" = "end"),
-                             match_fun = list(`==`, `>=`, `<=`))
-
-
-df_st_p <- df_st %>%
-  distinct() %>%
-  group_by(site) %>%
-  # filter(oow == "no" | is.na(oow)) %>%
-  mutate(DOhyp = if_else(DO <4, 1, 0),
-         year = year(datetime)) %>%
-  mutate(group = cumsum(c(1, diff(datetime) > 1))) %>%
-  group_by(site, group) %>%
-  mutate(hour = row_number() - 1) %>%
-  group_by(site, date, group) %>%
-  mutate(color = min(DO) == DO,
-         color = if_else(is.na(color), FALSE, color),
-         gs = paste(group, site))
-
-ggplot() +
-  geom_line(data = df_st_p,
-            aes(x = hour,
-                y = DO, group = gs),
-            alpha = 0.5)+
-  # geom_point(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"),
-  #            aes(x = hour, y = DO, color = color)) +
-  # stat_smooth(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"), 
-  #             aes(x = hour, y = DO, group = gs),
-  #             method = "lm", se = FALSE) +
-  # ggpubr::stat_regline_equation(data = filter(df_dry_p, color == TRUE), 
-  #                               aes(x = hour, y = DO, group = gs)) +
-  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
-  facet_wrap(~site, scales = "free_x")+
-  scale_color_manual(values = "blue") +
-  theme_bw() +
-  theme(legend.position = "none") +
-  labs(title = "storm events leading to hypoxia",
-       x = "hours after storm",
-       y = "DO (mg/L)")
-
-
-ggsave(filename = "Z:/RHypoxie/Figures/storm_hypoxia_mgl.png",
-       dpi = 1200,
-       height = 18,
-       width = 28,
-       units = "cm")
-
-
-
-# Time until hypoxia
-df_th_st <- df_st_p %>%
-  filter(DOhyp == 1) %>%
-  ungroup() %>%
-  group_by(site, group) %>%
-  filter(hour == min(hour)) %>%
-  left_join(ungroup(df_st_p) %>%
-              group_by(site, group) %>%
-              filter(hour == 0) %>%
-              select(Q_start = Q))
-
-ggplot(data = df_th_st,
-       aes(x = log(Q_start),
-           y = hour))+
-  geom_point() +
-  theme_bw() +
-  # geom_abline(intercept = 0, slope = 24) +
-  labs(title = "time until first instance of hypoxia after storm",
-       y = "time until hypoxia (hours)",
-       x = "starting discharge (m3/s)")
-
-
-
-
-
-
-ggplot() +
-  geom_line(data = filter(df_dry_p, gs == "2 charpassonne château de donzy"),
-            aes(x = hourbef,
-                y = DO, group = gs),
-            alpha = 0.5)+
-  geom_point(data = filter(df_dry_p, color == TRUE, gs == "5 charpassonne le tél"),
-             aes(x = hourbef, y = DO, color = color)) +
-  geom_hline(yintercept = 4, linetype = "dashed", color = "red") +
-  # facet_wrap(~site, scales = "free_x")+
-  scale_color_manual(values = "blue") +
-  theme_bw() +
-  theme(legend.position = "none")
-
-
-
-dat = c("4 charpassonne le tél", "5 charpassonne le tél", "3 loise aval doise salt",
-        "9 toranche aval", "3 coise la bruyere", "2 charpassonne château de donzy")
-c
-dat_dry = filter(df_dry_p, gs %in% c(dat))
-writexl::write_xlsx(dat_dry, file.path("data", "data_for_remi_model.xlsx"))

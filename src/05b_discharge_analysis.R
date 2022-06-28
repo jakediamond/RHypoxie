@@ -13,8 +13,10 @@ library(tidyverse)
 # Load data
 dfq <- readRDS(file.path("data", "04_discharge and stage", "hourly_discharge_all.RDS"))
 
-# Only data we need is site, datetime, and Q
-dfq <- select(dfq, -h_cm)
+# Only data we need is site, datetime, and Q, get names common format
+dfq <- select(dfq, -h_cm) %>%
+  mutate(siteq = str_replace_all(siteq, " ", "_"),
+         siteq = tolower(site))
 
 # Nest the data for easy use
 dfqn <- dfq %>%
