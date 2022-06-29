@@ -360,15 +360,29 @@ df_hyp_length <- df_dry_p %>%
   group_by(site, group) %>%
   mutate(cons = runner::streak_run(DOhyp)) %>%
   filter(DOhyp == 1) %>%
-  filter(cons == max(cons))
+  filter(cons == max(cons)) %>%
+  left_join(select(meta_geom, -site))
 
-ggplot(data = df_hyp_length,
+p_len_cons_hyp <- ggplot(data = df_hyp_length,
        aes(x = strahler,
            y = cons,
            group = strahler)) +
-  geom_boxplot()
+  geom_boxplot() +
+  theme_bw() +
+  scale_y_continuous(limits = c(0, 30)) +
+  labs(x = "Strahler order",
+       y = "length of consecutive hypoxia (hours)")
 
 
+p_len_cons_hyp
+ggsave(plot = p_len_cons_hyp,
+       filename = file.path("results", "Figures", "drying_summaries", "cons_len_hyp_strah.png"),
+       dpi = 1200,
+       height = 9.2,
+       width = 9.2,
+       units = "cm")
+  
+  
 ggplot(data = filter(df_hyp, !(type %in% c("pond", "pool", "respiration", "storm_up"))),
        aes(x = type)) +
   geom_bar() +

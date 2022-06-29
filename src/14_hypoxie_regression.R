@@ -11,6 +11,16 @@ library(tidyverse)
 # Load sensor data
 df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
 
+df <- readRDS(file.path("data", "09_loire_data","loire_headwaters_data.RDS")) %>%
+  unnest() %>%
+  ungroup() %>%
+  mutate(site = tolower(Site))
+
+df_q <- readRDS(file.path("data", "09_loire_data","discharge_plus_v2.RDS")) %>%
+  group_by(site) %>%
+  summarize(across(where(is.numeric), mean, na.rm = T))
+
+
 # Load watershed land use data
 ws <- readRDS(file.path("data", "08_GIS", "ws_land_use")) %>%
   mutate(site = tolower(site),
@@ -39,11 +49,11 @@ df_k <- readxl::read_xlsx(file.path("data", "04_discharge and stage", "hydraulic
 df_h <- df %>%
   mutate(date = date(datetime),
          month = month(datetime),
-         DOhyp = if_else(DO < 4, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
+         DOhyp = if_else(DO < 3, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
 
 # temperature and discharge summary
 df_tq <- df %>%
-  group_by(site) %>%
+  group_by(site_code, site) %>%
   dplyr::summarize(temp = median(DO_temp, na.rm = T))
 
 df_hl <- df_h %>%
@@ -57,43 +67,46 @@ df_hl <- df_h %>%
   filter(hyp_l == max(hyp_l)) %>%
   ungroup() %>%
   group_by(site) %>%
-  dplyr::summarize(hypl = mean(hyp_l, na.rm = T),
-                   slope = mean(slope, na.rm = T),
-                   alt = mean(altitude_m, na.rm = T),
-                   area = mean(area_km2, na.rm = T),
-                   L50corr = mean(L50_corr, na.rm = T),
-                   H50corr = mean(H50_corr, na.rm = T),
-                   nw_b = mean(nw_b, na.rm = T),
-                   nw_f = mean(nw_f, na.rm = T),
-                   Q50corr = mean(Q50_corr, na.rm = T),
-                   strahler = mean(strahler, na.rm = T),
+  dplyr::summarize(hypl = mean(hyp_l, na.rm = T)) %>%
                    # slope = mean(slope, na.rm = T),
-                   SF = mean(SF, na.rm = T),
-                   h = mean(h ,na.rm = T),
-                   w = mean(w, na.rm = T),
-                   v = mean(v, na.rm = T)) %>%
+                   # alt = mean(altitude_m, na.rm = T),
+                   # area = mean(area_km2, na.rm = T),
+                   # L50corr = mean(L50_corr, na.rm = T),
+                   # H50corr = mean(H50_corr, na.rm = T),
+                   # nw_b = mean(nw_b, na.rm = T),
+                   # nw_f = mean(nw_f, na.rm = T),
+                   # Q50corr = mean(Q50_corr, na.rm = T),
+                   # strahler = mean(strahler, na.rm = T),
+                   # # slope = mean(slope, na.rm = T),
+                   # # SF = mean(SF, na.rm = T),
+                   # h = mean(h ,na.rm = T),
+                   # w = mean(w, na.rm = T),
+                   # v = mean(v, na.rm = T)) %>%
   left_join(buf_mod) %>%
-  left_join(df_tq)
+  left_join(df_tq) %>%
+  left_join(df_q)
 
 # Calculate daily stats by site
 df_hyp_mod <- df_h %>%
   group_by(site) %>%
-  dplyr::summarize(DOhypn = round(sum(DOhyp, na.rm = T) / n() *100, 2),#percentage of time that is hypoxic
+  dplyr::summarize(DOhypn = round(sum(DOhyp, na.rm = T) / n() *100, 2)) %>%#percentage of time that is hypoxic
             # slope = mean(slope, na.rm = T),
-            alt = mean(altitude_m, na.rm = T),
-            area = mean(area_km2, na.rm = T),
+            # alt = mean(altitude_m, na.rm = T),
+            # area = mean(area_km2, na.rm = T),
             # L50corr = mean(L50_corr, na.rm = T),
-            H50corr = mean(H50_corr, na.rm = T),
-            nw_b = mean(nw_b, na.rm = T),
-            nw_f = mean(nw_f, na.rm = T),
-            Q50corr = mean(Q50_corr, na.rm = T),
-            strahler = mean(strahler, na.rm = T),
-            slope = mean(slope, na.rm = T),
-            SF = mean(SF, na.rm = T),
-            h = mean(h ,na.rm = T),
-            w = mean(w, na.rm = T),
-            v = mean(v, na.rm = T)) %>%
-  left_join(buf_mod)
+            # H50corr = mean(H50_corr, na.rm = T),
+            # nw_b = mean(nw_b, na.rm = T),
+            # nw_f = mean(nw_f, na.rm = T),
+            # Q50corr = mean(Q50_corr, na.rm = T),
+            # strahler = mean(strahler, na.rm = T)) %>%
+            # slope = mean(slope, na.rm = T),
+            # SF = mean(SF, na.rm = T),
+            # h = mean(h ,na.rm = T),
+            # w = mean(w, na.rm = T),
+            # v = mean(v, na.rm = T)) %>%
+  left_join(buf_mod) %>%
+    left_join(df_tq) %>%
+    left_join(df_q)
 # 
 # # Summary of that data
 # df_daily_sum <- df_daily %>%
@@ -107,9 +120,10 @@ df_hyp_mod <- df_h %>%
 # Best subsets
 
 df_mod <- filter(df_hyp_mod, site != "coise aval vaudragon") %>%
-  select(-site, -h, -w) %>%
+  select(-site, -site_code) %>%
+  # select(-site, -h, -w) %>%
   replace(is.na(.), 0) %>%
-  mutate(area = log(area))
+  mutate(area = log(area_km2))
 
 pivot_longer(df_mod,  cols = everything()) %>%
   ggplot(aes(x = value)) + geom_histogram() + facet_wrap(.~name, scales = "free")
@@ -127,9 +141,9 @@ pairs(df_mod)
 
 
 df_mod2 <- filter(df_hl, site != "coise aval vaudragon") %>%
-  select(-site, -h, -w) %>%
+  select(-site, -site_code, -h, -w) %>%
   replace(is.na(.), 0) %>%
-  mutate(area = log(area))
+  mutate(area = log(area_km2))
 
 
 models2 <- regsubsets(hypl ~ ., data = df_mod2, nvmax = 5)
@@ -140,8 +154,8 @@ data.frame(
   CP = which.min(res.sum2$cp),
   BIC = which.min(res.sum2$bic)
 )
-
-mod2 <- lm(hypl ~ Q50corr + `irrigated agriculture` + urban, df_mod2)
+df_mod2$Q50_corr
+mod2 <- lm(hypl ~ area + `irrigated agriculture` + urban + slope, data = df_mod2)
 #produce added variable plots
 avPlots(mod2)
 summary(mod2)

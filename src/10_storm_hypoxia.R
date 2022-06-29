@@ -96,24 +96,27 @@ df_st_p <- df_storm_final %>%
 
 
 ggplot() +
-  geom_line(data = df_st_p,
+  geom_line(data = filter(df_st_p, month(start) == 7),
             aes(x = time,
-                y = DO, group = sitegroup)) +
+                y = DO, group = sitegroup,
+                color = geomorph),
+            alpha = 0.7,
+            size = 1.2) +
   geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  facet_wrap(~site, scales = "free_x")+
+  facet_wrap(~geomorph, scales = "free_x")+
   geom_vline(xintercept = 0) +
   # scale_color_manual(values = "blue") +
   theme_bw() +
-  theme(legend.position = "none") +
-  labs(title = "storm events leading to hypoxia",
+  # theme() +
+  labs(title = "7 unique storm events leading to hypoxia",
        x = "days after storm",
        y = "DO (mg/L)")
 
 
-ggsave(filename = "Z:/RHypoxie/Figures/storm_hypoxia_mgl.png",
+ggsave(filename = file.path("results", "Figures", "storm_summaries", "storm_hypoxia_mgl_geomorph_facet.png"),
        dpi = 1200,
-       height = 18,
-       width = 28,
+       height = 9.2,
+       width = 16,
        units = "cm")
 
 # Dissolved oxygen at the beginning and lowest value for each flushing flow
