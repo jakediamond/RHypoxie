@@ -7,6 +7,7 @@
 # Load libraries
 library(lubridate)
 library(hydrostats)
+# library(bdrc)
 library(scales)
 library(tidyverse)
 
@@ -119,3 +120,16 @@ dflf %>%
             sd = sd(spell.length),
             minl = min(spell.length),
             maxl = max(spell.length))
+
+
+
+# Stage discharge ---------------------------------------------------------
+x <- dfq %>%
+  mutate(h_m = h_cm / 100)
+
+ggplot(data=x,
+       aes(y = h_m, 
+           x = q_m3s^0.5,
+           color = siteq)) +
+  geom_point() +
+  stat_smooth(method = "lm")

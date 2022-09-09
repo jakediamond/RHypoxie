@@ -11,63 +11,64 @@ library(imputeTS)
 library(plotly)
 library(lubridate)
 library(tidyverse)
+library(tidytable)
 
 # Read in all DO data
-df <- readRDS(file.path("Data", "02_sensor_data", "raw", "raw_time_series_data.RDS"))
+df <- readRDS(file.path("Data", "02_sensor_data", "raw", "raw_time_series_data_all.RDS"))
 
 # Change some naming for consistency
 df <- df %>%
-  mutate(site = if_else(site == "milonier", "miloniere", site),
+  mutate.(site = if_else(site == "milonier", "miloniere", site),
          confluence = if_else(confluence == "yzeron_milonier", "yzeron_miloniere", confluence))
 
 # Fix the data for mercier amont ratier...somehow its days for one download are 
 # 49 days and 5 hours behind
 df <- df %>%
-  mutate(datetime = if_else(filename == "20854287_21052021.csv",
+  mutate.(datetime = if_else.(filename == "20854287_21052021.csv",
                             datetime + days(49) + hours(5),
                             datetime),
-         datetime_utc = if_else(filename == "20854287_21052021.csv",
+         datetime_utc = if_else.(filename == "20854287_21052021.csv",
                             datetime_utc + days(49) + hours(5),
                             datetime_utc))
 
 # Also, we know of some periods with bad data...turn those to NA here
 df <- df %>%
-  mutate(value = if_else(type == "DO" & ((site == "ardevel amont vernus" &
-                                           between(datetime, 
+  mutate.(value = if_else.(type == "DO" & ((site == "ardevel amont vernus" &
+                                           between.(datetime, 
                                                    ymd_hm("202105270700"),
                                                    ymd_hm("202106041600"))) |
                                            (site == "mercier aval presles" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202108282200"),
                                                       ymd_hm("202108311100"))) |
                                            (site == "ratier aval mercier" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202108071200"),
                                                       ymd_hm("202108091500"))) |
                                            (site == "ratier" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202107311700"),
                                                       ymd_hm("202108011900"))) |
                                            (site == "yzeron aval miloniere" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202108041900"),
                                                       ymd_hm("202108261700"))) |
                                            (site == "yzeron amont miloniere" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202108040300"),
                                                       ymd_hm("202108101900"))) |
                                            (site == "miloniere" &
-                                              between(datetime, 
+                                              between.(datetime, 
                                                       ymd_hm("202108280300"),
                                                       ymd_hm("202108311900")))
                                          ),
                          NA_real_,
                          value),
-         temp = if_else(is.na(value), NA_real_, temp))
+         temp = if_else.(is.na(value), NA_real_, temp))
 
 # Nest data by site
 df_n <- df %>%
-  select(filename, site, type, datetime, value) %>%
+  select.(filename, site, type, datetime, value) %>%
   group_by(type, site) %>%
   nest()
 
@@ -75,7 +76,6 @@ df_n <- df %>%
 # Data cleaning function, finds anomalies/jumps/replaces with NA
 # the probability limit for delta for detecting "bad" jumps (default 0.95),
 # the multiplier for delta to detect the jump (default 2)
-# also a minimum threshold for expected DO (default 2)
 clean_fun <- function(data,
                       type,
                       prob = 0.95,
@@ -85,7 +85,7 @@ clean_fun <- function(data,
 
   # Get normal bounds based on type
   dat_bounds = switch(type,
-                      DO = c(1, 17),
+                      DO = c(0, 17),
                       light = c(0, 120000),
                       conductivity = c(10, 800))
   
@@ -101,7 +101,7 @@ clean_fun <- function(data,
   
   # Make the data NA where there are big jumps, or just wrong data (anomalies)
   # If the data jump more than 2x the 95% value for that time period
-  # If DO.obs is less than 1 mg/L (not really possible in this river)
+  # If data are outside bounds
   # If there was an anomaly from decomposition method
   data = data %>% 
     mutate(dvalue = value - lag(value),
@@ -148,8 +148,8 @@ lowpass_fun <- function(data,
 # Apply functions ---------------------------------------------------------
 # Clean the data and use the lowpass filter
 df_n <- df_n %>%
-  mutate(clean = map2(data, type, clean_fun),
-         filt = map(clean, lowpass_fun))
+  mutate.(clean = map2.(data, type, clean_fun),
+         filt = map.(clean, lowpass_fun))
 
 # Get all in one dataframe
 df2 <- df_n %>%
@@ -180,7 +180,7 @@ df_final <- select(df3, site:datetime, value_clean = value_use) %>%
   mutate(temp = if_else((temp < 0 & type != "light") | (temp > 30 & type != "light"), NA_real_, temp))
 
 # Save data
-saveRDS(df_final, "Data/02_sensor_data/all_sensor_data_clean.RDS")
+saveRDS(df_final, "Data/02_sensor_data/all_sensor_data_clean_with_2022.RDS")
 
 # Clean up to wide format -------------------------------------------------
 # Get into wider format
@@ -196,21 +196,8 @@ df_w <- df_final %>%
          cond = value_conductivity,
          cond_temp = temp_conductivity)
 
-# Some data cleaning
-# df_w <- df_w %>%
-#   mutate_at(vars(10:15), funs(if_else(. < 0, NA_real_, .))) # get rid of negative values
-
-# Get rid of crazy values
-# df_w <- df_w %>%
-#   mutate(DO = if_else(DO > 25 | DO <0, NA_real_, DO),
-#          DO_temp = if_else(DO_temp > 40 | DO_temp <0 , NA_real_, DO_temp),
-#          lux_water = if_else(lux_water > 100000, NA_real_, lux_water),
-#          lux_water_temp = if_else(lux_water_temp > 40, NA_real_, lux_water_temp),
-#          cond = if_else(cond < 0 | cond > 2000, NA_real_, cond),
-#          cond_temp = if_else(cond_temp > 40, NA_real_, cond_temp))
-
 # Save data
-saveRDS(df_w, "Data/02_sensor_data/all_sensor_data_clean_wide.RDS")
+saveRDS(df_w, "Data/02_sensor_data/all_sensor_data_clean_wide_with_2022.RDS")
 
 # Save as xlsx with sheets
 # Split one data frame per site
@@ -222,4 +209,4 @@ list_of_dfs %>%
   map(~unique(.)) -> names(list_of_dfs)
 
 list_of_dfs %>%
-  writexl::write_xlsx(path = "Data/02_sensor_data/all_sensor_data_clean_wide.xlsx")
+  writexl::write_xlsx(path = "Data/02_sensor_data/all_sensor_data_clean_wide_with_2022.xlsx")
