@@ -49,7 +49,7 @@ ggplot(data=df_q,
 
 str(df)
 
-z = df %>%
+df_depth <- df %>%
   mutate(newdepth = if_else(data.table::between(area_km2, area_q_km2*0.9, area_q_km2*1.1),
                             h_cm / 100,
                             0.18*sqrt(q_mmd) + (0.25 - 0.346+0.11*log(area_km2)) - 0.05
@@ -58,7 +58,7 @@ z = df %>%
   mutate(depth = if_else(newdepth < 0, 0.05, newdepth),
          solar.time = calc_solar_time(datetime, longitude))
 
-
+saveRDS(df_depth, file.path("data", "estimated_depths.RDS"))
 
 
 

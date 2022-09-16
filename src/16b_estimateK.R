@@ -3,9 +3,17 @@ library(MASS)
 library(tidyverse)
 library(tidytable)
 
+
+# Load data ---------------------------------------------------------------
 # Load DO data
 df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS")) %>%
   filter.(watershed %in% c("ardieres", "vauxonne", "yzeron"))
+
+# Load depth data
+df_d <- readRDS(file.path("data", "estimated_depths.RDS")) %>%
+  ungroup() %>%
+  group_by(site, date) %>%
+  summarize(depth = mean(depth, na.rm = T))
 
 # Get it to be only nighttime(ish) data,
 df_night <- df %>%
@@ -75,12 +83,14 @@ df_k600 <- df_night %>%
   mutate(k2 = k2 * 24,
          k600 = convert_kGAS_to_k600(k2, temp))
 
+# Quick look just to convince ourselves
 df_k600 %>%
-    filter(site == "ratier aval mercier") %>%
+    filter(site == "charbonnieres") %>%
   ggplot(aes(x = discharge,
              y = k600)) +
   geom_point() +
   theme_bw() +
+  # scale_y_log10()+
   scale_x_log10()+
   scale_y_continuous(limits = c(0, 100)) +
   stat_summary_bin(bins = 5) +
@@ -88,15 +98,22 @@ df_k600 %>%
                                                                data,
                                                                weights=weight,
                                                                psi = psi.bisquare))
+# add depth to get K600 (1/d)
+df_k600 <- right_join(df_k600, df_d) %>%
+  mutate(K600 = k600 / depth)
 
+# Estimate regressions on binned data for use in metabolism estimates
+df_met <- df_k600 %>%
+  group_by(site) %>%
+  mutate(lnQ = log(discharge),
+         lnK = log(K600),
+         Qbins = cut(lnQ, 5)) %>%
+  group_by(site, Qbins) %>%
+  drop_na(Qbins) %>%
+  summarize(node = mean(lnQ),
+            meanlnK = mean(lnK),
+            sdlnK = sd(lnK)) %>%
+  ungroup() %>%
+  imputeTS::na_kalman()
 
-
-x = filter(df_night_reg, site == "mercier",
-           dateuse == ymd(20210403)) %>%
-  filter(hour >17, hour<23)
-ggplot(data = x,
-       aes(x = DO_def,
-           y = del_DO*24)) +
-  geom_point()
-
-summary(lm(del_DO*24 ~ DO_def, data = x))
+saveRDS(df_met, file.path("data", "k_estimates_for_bayes.RDS"))
