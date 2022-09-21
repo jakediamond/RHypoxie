@@ -98,9 +98,9 @@ met_fun <- function(data, data_q, data_k, mod_type = bayes_mod){
   
   # Set the specifications
   bayes_specs <- specs(model_name = mod_type,
-                       burnin_steps = 1000,
-                       saved_steps = 500, 
-                       K600_lnQ_nodediffs_sdlog = 0.5,
+                       burnin_steps = 500,
+                       saved_steps = 250, 
+                       # K600_lnQ_nodediffs_sdlog = 0.5,
                        K600_lnQ_nodes_centers = brks,
                        K600_lnQ_nodes_meanlog = meanlnK,
                        K600_lnQ_nodes_sdlog = sdlnK,
@@ -114,12 +114,13 @@ met_fun <- function(data, data_q, data_k, mod_type = bayes_mod){
 
 # Run the metabolism model on nested data ---------------------------------
 metab_all <- df_n %>%
+  filter(site == "charbonnieres") %>%
   transmute(mm = pmap(list(data, data_q, data_k),
                        ~met_fun(data = ..1,
                                 data_q = ..2,
                                 data_k = ..3)))
 
-# saveRDS(metab_all, "C:/Users/jacob.diamond/Desktop/rhone_metabolism_bayes_new.RDS")
+# saveRDS(metab_all, "C:/Users/jacob.diamond/Desktop/rhone_metabolism_bayes_new_no_priors.RDS")
 # metab_all <- readRDS(file.path("data", "rhone_metabolism_mle.RDS"))
 # Inspect the model -------------------------------------------------------
 df_metab <- metab_all %>%
@@ -136,7 +137,7 @@ plot(log(df_metab$discharge.daily), df_metab$K600.daily)
 plot(df_metab$K600.daily, -df_metab$ER.daily)
 
 d = pluck(metab_all, 2, 1)
-m = pluck(metab_all, 5, 1)
+m = pluck(metab_all, 2, 1)
 streamMetabolizer::plot_distribs(m, parname = "K600_daily")
 get_specs(m)$params_in
 plot_metab_preds(m)
@@ -164,3 +165,6 @@ test2 <- mm_all_mle %>%
        value = value,
        c(GPP, ER))
 streamMetabolizer::metab_night
+
+
+xx <- readRDS(file.path("results", "rhone_metabolism_bayes_preds.RDS"))

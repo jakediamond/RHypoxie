@@ -8,35 +8,45 @@ library(leaps)
 library(lubridate)
 library(tidyverse)
 
-# Load sensor data
-df <- readRDS(file.path("data", "10_clean_data","hourly_data_all.RDS"))
+# Load hypoxia summary data -----------------------------------------------
+df_hyp <- readRDS(file.path("results", "hypoxia_summary.RDS"))
 
-df <- readRDS(file.path("data", "09_loire_data","loire_headwaters_data.RDS")) %>%
-  unnest() %>%
-  ungroup() %>%
-  mutate(site = tolower(Site))
+
+# Load predictor data -----------------------------------------------------
+# Load sensor data to get temperature summary, depth, discharge, make it only summer
+df <- readRDS(file.path("data", "estimated_depths.RDS")) %>%
+  group_by(site_code, site) %>%
+  filter(between(month, 7 , 10)) %>%
+  dplyr::summarize(temp = median(temp, na.rm = T),
+                   depth = median(depth, na.rm = T),
+                   q = median(q_mmd, na.rm = T),
+                   altitude = mean(altitude_m))
 
 df_q <- readRDS(file.path("data", "09_loire_data","discharge_plus_v2.RDS")) %>%
   group_by(site) %>%
   summarize(across(where(is.numeric), mean, na.rm = T))
 
+# Load thermal regime data
+df_therm <- read_tsv(file.path("data", "07_geomorphology", 
+                                  "rhypoxie_RMC_join_regimes.txt"),
+                     locale = locale(decimal_mark = ","))
 
-# Load watershed land use data
-ws <- readRDS(file.path("data", "08_GIS", "ws_land_use")) %>%
-  mutate(site = tolower(site),
-         area_lu_frac = units::drop_units(area_lu_frac)) %>%
-  rename(ws_area_frac = area_lu_frac)
-
-# Load buffer land use data
-buf <- readRDS(file.path("data", "08_GIS", "buffer_land_use_v2")) %>%
-  mutate(area_lu_frac = units::drop_units(area_lu_frac)) %>%
-  rename(buff_area_frac = area_lu_frac)
-
-# mod format for buffers, only look at 50m at first
-buf_mod <- filter(buf, buff_dists == 20) %>%
-  ungroup() %>%
-  select(site, plot_name, buff_area_frac, buff_dists) %>%
-  pivot_wider(names_from = plot_name, values_from = buff_area_frac)
+# # Load watershed land use data
+# ws <- readRDS(file.path("data", "08_GIS", "ws_land_use")) %>%
+#   mutate(site = tolower(site),
+#          area_lu_frac = units::drop_units(area_lu_frac)) %>%
+#   rename(ws_area_frac = area_lu_frac)
+# 
+# # Load buffer land use data
+# buf <- readRDS(file.path("data", "08_GIS", "buffer_land_use_v2")) %>%
+#   mutate(area_lu_frac = units::drop_units(area_lu_frac)) %>%
+#   rename(buff_area_frac = area_lu_frac)
+# 
+# # mod format for buffers, only look at 50m at first
+# buf_mod <- filter(buf, buff_dists == 20) %>%
+#   ungroup() %>%
+#   select(site, plot_name, buff_area_frac, buff_dists) %>%
+#   pivot_wider(names_from = plot_name, values_from = buff_area_frac)
 
 # Load hydraulic data
 # Load geometry data
@@ -45,16 +55,13 @@ df_k <- readxl::read_xlsx(file.path("data", "04_discharge and stage", "hydraulic
   mutate(site = tolower(Site)) %>%
   select(-Site)
 
-# Hypoxia summary
-df_h <- df %>%
-  mutate(date = date(datetime),
-         month = month(datetime),
-         DOhyp = if_else(DO < 3, 1, 0)) #define hypoxia as less than 50% saturation (Carter et al. 2021)
 
-# temperature and discharge summary
-df_tq <- df %>%
-  group_by(site_code, site) %>%
-  dplyr::summarize(temp = median(DO_temp, na.rm = T))
+# df <- readRDS(file.path("data", "09_loire_data","loire_headwaters_data.RDS")) %>%
+#   unnest() %>%
+#   ungroup() %>%
+#   mutate(site = tolower(Site))
+
+
 
 df_hl <- df_h %>%
   group_by(site) %>%

@@ -8,6 +8,7 @@
 library(lubridate)
 library(readxl)
 library(scales)
+library(patchwork)
 library(tidytext)
 library(tidyverse)
 

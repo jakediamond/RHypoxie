@@ -30,7 +30,6 @@ df <- df %>%
   mutate(DOhyp = if_else(DO < 3, 
                          1, 
                          0)) #define hypoxia as less than 3 mg/Lsaturation 
-# (Carter et al. 2021 uses 50%)
 
 # Some plotting info for the rest -----------------------------------------
 theme_second_axis <- theme_minimal() +
@@ -55,6 +54,69 @@ layout2 <- c(
   area(t = 1, l = 1, b = 3, r = 4),
   area(t = 3, l = 1, b = 6, r = 4)
 )
+
+
+# Overall hypoxia info ----------------------------------------------------
+# Overall hypoxia percentages
+df_hyp_per <- ungroup(df) %>%
+  group_by(site) %>%
+  summarize(hy = sum(DOhyp, na.rm = T),
+            n = n(),
+            per = hy / n)
+
+# hypoxia run lengths
+df_hyp_rls <- df %>%
+  group_by(site) %>%
+  arrange(site, datetime) %>%
+  mutate(hyp_l = sequence(rle(DOhyp)$lengths),
+         hyp_change = if_else(((lag(DOhyp, default = 0) != DOhyp) &
+                                 (lag(DOhyp, 2, default = 0) != DOhyp)), 
+                              1, 0)) %>%
+  filter(DOhyp == 1) %>%
+  mutate(hyp_pd = cumsum(replace_na(hyp_change, 0))) %>%
+  mutate(year = year(date)) %>%
+  ungroup()
+
+# Median lengths of hypoxia
+df_hyp_len <- ungroup(df_hyp_rls) %>%
+  group_by(site, hyp_pd) %>%
+  filter(hyp_l == max(hyp_l)) %>%
+  ungroup() %>%
+  group_by(site) %>%
+  summarize(hyp_len_med = median(hyp_l))
+
+# Median timing between hypoxic events
+df_hyp_diff <- ungroup(df_hyp_rls) %>%
+  group_by(site, hyp_pd) %>%
+  filter(hyp_l == max(hyp_l) |
+         hyp_l == min(hyp_l)) %>%
+  ungroup() %>%
+  group_by(site) %>%
+  mutate(t_dif = if_else(hyp_pd - lag(hyp_pd) == 1, 
+                         datetime - lag(datetime), NA_real_)) %>%
+  summarize(hyp_t_dif_med = as.numeric(median(t_dif, na.rm = T) / 3600))
+
+# Number of hypoxia periods
+df_hyp_pds <- df_hyp_rls %>%
+  group_by(site) %>%
+  summarize(pds = max(hyp_pd, na.rm = T))
+
+# probability of nighttime hypoxia given hypoxia
+df_hyp_night <- df %>%
+  filter(DOhyp == 1) %>%
+  group_by(site) %>%
+  mutate(night = if_else(light < 200, 1, 0)) %>%
+  summarize(nhyp = sum(night == 1) / n())
+
+# overall
+df_hyp_all <- left_join(df_hyp_per, df_hyp_diff) %>%
+  left_join(df_hyp_len) %>%
+  left_join(df_hyp_pds) %>%
+  left_join(df_hyp_night) %>%
+  mutate_if(is.numeric, ~replace_na(., 0))
+
+saveRDS(df_hyp_all, file.path("results", "hypoxia_summary.RDS"))
+
 # Plot of monthly hypoxia, temp, q ----------------------------------------
 p_monthly_hyp <- df %>%
   mutate(year = year(date)) %>%
@@ -80,7 +142,7 @@ p_monthly_hyp
 p_monthly_temp <- df %>%
   mutate(year = year(date)) %>%
   ggplot(aes(x = month,
-             y = DO_temp)) + 
+             y = temp)) + 
   stat_summary(color = "red", geom = "line") +
   stat_summary(color = "red") +
   stat_summary(color = "transparent", fill = "transparent", geom = "bar") +
@@ -190,7 +252,6 @@ p_events
 
 
 # Hypoxia by hour of day --------------------------------------------------
-
 p_hour <- df %>%
   mutate(hour = hour(solartime)) %>%
   group_by(hour) %>%
