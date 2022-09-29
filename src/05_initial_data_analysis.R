@@ -57,7 +57,13 @@ layout2 <- c(
 
 
 # Overall hypoxia info ----------------------------------------------------
-# Overall hypoxia percentages
+ungroup(df) %>%
+  filter(!is.na(DO)) %>%
+  summarize(hy = sum(DOhyp, na.rm = T),
+            n = n(),
+            per = hy / n)
+
+# Overall hypoxia percentages by site
 df_hyp_per <- ungroup(df) %>%
   group_by(site) %>%
   summarize(hy = sum(DOhyp, na.rm = T),
