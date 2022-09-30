@@ -43,6 +43,21 @@ df_dry <- ungroup(df) %>%
 saveRDS(df_dry, file.path("data", "10_clean_data", "hypoxia_drying_new.RDS"))
 df_dry <- readRDS(file.path("data", "10_clean_data", "hypoxia_drying.RDS"))
 
+# How many of the sites that dried, became hypoxic?
+df_dry %>%
+  distinct() %>%
+  group_by(site) %>%
+  mutate(DOhyp = if_else(DO < 3, 1, 0),
+         year = year(datetime)) %>%
+  mutate(group = cumsum(c(1, diff(datetime) > 1))) %>% # group by drying events
+  group_by(site, group) %>%
+  filter(oow == "no" | is.na(oow))  %>%
+  ungroup() %>%
+  # distinct(site)
+  # summarize(hyp = sum(DOhyp)) %>%
+  # ungroup() %>%
+  summarize(x = sum(hyp ==0, na.rm = T))
+
 # Plotting theme ----------------------------------------------------------
 # theme for discharge plots
 p_theme_q <- 
@@ -69,7 +84,6 @@ layout <- c(
 df_dry_p <- df_dry %>%
   distinct() %>%
   group_by(site) %>%
-  # filter(oow == "no" | is.na(oow)) %>%
   mutate(DOhyp = if_else(DO < 3, 1, 0),
          year = year(datetime)) %>%
   mutate(group = cumsum(c(1, diff(datetime) > 1))) %>% # group by drying events
@@ -83,40 +97,61 @@ df_dry_p <- df_dry %>%
   ungroup() %>%
   group_by(gs) %>%
   mutate(hourbef = hour - max(hour)) %>%
-  filter(sum(DOhyp) > 1)
+  filter(sum(DOhyp) > 1) %>%
+  mutate(DOsmooth = stats::filter(DO, rep(1/5,5), sides =2))
 
 # Plot of time series
 p_ts_dry <- ggplot() +
-  geom_line(data = filter(df_dry_p, year == 2020, datetime > ymd_h(2020071700),
-                          !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
-                          !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
-            aes(x = datetime,
-                y = DO, group = gs,
-                color = log(area_km2))) +
+  geom_line(data = filter(df_dry_p, between(datetime, ymd_h(2020090100), ymd_h(2020091500))),
+            aes(x = hourbef, y = DOsmooth, group = gs, color = area_km2),
+            size = 1.1) +
+  # geom_line(data = filter(df_dry_p, year == 2020, datetime > ymd_h(2020071700),
+  #                         !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
+  #                         !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
+  #           aes(x = datetime,
+  #               y = DO, group = gs,
+  #               color = log(area_km2))) +
   # geom_point(data = filter(df_dry_p, color == TRUE),
   #            aes(x = hour, y = DO, color = color)) +
   # geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  facet_grid(~month(datetime), scales = "free_x", space = "free")+
-  scale_color_viridis_c() +
+  # facet_grid(~month(datetime), scales = "free_x", space = "free")+
+  scale_color_viridis_c(name = expression("area ("*km^2*")")) +
+  scale_x_continuous(limits = c(-72, 0),
+                     breaks = seq(-120, 0, 24)) +
+  # scale_x_datetime(date_breaks = "3 days", date_labels = "%m-%d") +
+  geom_hline(yintercept = 3, linetype = "dashed", size = 1.1) +
   # scale_color_manual(values = "blue") +
   theme_bw() +
-  theme(legend.position = "bottom", legend.direction = "horizontal",
+  guides(color = guide_colorbar(title.position = "top", title.hjust = 0.5)) + 
+  theme(legend.position = c(0.2,0.9), legend.direction = "horizontal",
         strip.background = element_blank(), strip.text = element_blank(),
-        axis.title.x = element_blank())
+        # axis.title.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  labs(y = expression("DO (mg "*L^{-1}*")"),
+       x = "hours before dry")
 p_ts_dry
 
 p_ts_dry_q <- ggplot() +
-  geom_line(data = filter(df, year == 2020, datetime > ymd_h(2020071700),
-                          siteq == "toranche_st_cyr_les_vignes",
-                          # siteq == "coise_le_nezel",
-                          datetime < ymd_h(2020092100),
-                          !between(datetime, ymd_h(2020083100), ymd_h(2020090300)),
-                          !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
-                          !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
-            aes(x = datetime,
-                y = q_mmd,
-                group = siteq),
+  geom_line(data = filter(ungroup(df_dry_p), 
+                          between(datetime, ymd_h(2020071700), 
+                                  ymd_h(2020080200))) %>%
+              distinct(datetime, q_mmd),
+            aes(x = datetime, y = q_mmd),
+            size = 1.1,
             color = "blue") +
+  # geom_line(data = filter(df, year == 2020, datetime > ymd_h(2020071700),
+  #                         siteq == "toranche_st_cyr_les_vignes",
+  #                         # siteq == "coise_le_nezel",
+  #                         datetime < ymd_h(2020092100),
+  #                         !between(datetime, ymd_h(2020083100), ymd_h(2020090300)),
+  #                         !between(datetime, ymd_h(2020080100), ymd_h(2020080300)),
+  #                         !between(datetime, ymd_h(2020082800), ymd_h(2020090100))),
+  #           aes(x = datetime,
+  #               y = q_mmd,
+  #               group = siteq),
+  #           color = "blue") +
   p_theme_q +
   labs(y = expression("q (mm "*d^{-1}*")")) +
   scale_y_continuous(position = "right", limits = c(0,0.5)) +
@@ -158,12 +193,20 @@ df_m <- df_dry_p %>%
 df_m2 <- df_m %>%
   pivot_wider(names_from = term, values_from = estimate:p.value)
 
+ungroup(df_m2) %>%
+  filter(name == "DO") %>%
+  summarize(mean = mean(-estimate_hour * 24, na.rm = T),
+            sd = sd(-estimate_hour * 24, na.rm = T),
+            med = median(-estimate_hour * 24, na.rm = T),
+            q = quantile(-estimate_hour * 24, c(0.25,0.5,0.75), na.rm = T))
+
 p_hist_droprates <- df_m2 %>%
   filter(name == "DO") %>%
   ggplot(aes(x = -estimate_hour * 24)) +
   geom_density(fill = "red", alpha = 0.5) +
   theme_bw() +
   geom_vline(aes(xintercept = median(-estimate_hour * 24, na.rm = T))) +
+  annotate("text", x = 1.5, y= 0.57, label = "median = 0.9") +
   labs(x = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"))
 p_hist_droprates
   
@@ -296,6 +339,12 @@ df_th <- df_dry_p %>%
             filter(hour == 0) %>%
             select(DO_start = DO))
 
+ungroup(df_th) %>%
+  summarize(mean = mean(hour / 24, na.rm = T),
+            sd = sd(hour / 24, na.rm = T),
+            med = median(hour / 24, na.rm = T),
+            q = quantile(hour / 24, c(0.25,0.5,0.75), na.rm = T))
+
 
 p_hist_dry_timhyp <- ggplot(data = df_th,
        aes(x = hour / 24)) +
@@ -305,6 +354,7 @@ p_hist_dry_timhyp <- ggplot(data = df_th,
   theme_bw() +
   # geom_abline(intercept = 0, slope = 24) +
   labs(x = "time until hypoxia (days)")
+p_hist_dry_timhyp
 
 ggsave(plot = p_hist_dry_timhyp,
        filename = file.path("results", "Figures", "drying_summaries", "time_to_hyp_hist.png"),
@@ -355,14 +405,40 @@ ggsave(filename = "Z:/RHypoxie/Figures/drying_rate_DO_rate.png",
 
 
 
+# Length of continuous hypoxia --------------------------------------------
 # Length of continuous hypoxia
 df_hyp_length <- df_dry_p %>% 
   ungroup() %>%
   group_by(site, group) %>%
-  mutate(cons = runner::streak_run(DOhyp)) %>%
-  filter(DOhyp == 1) %>%
+  mutate(cons = runner::streak_run(DOhyp),
+         hyp_change = abs(DOhyp - lag(DOhyp)),
+         pd = cumsum(replace_na(hyp_change, 0)),
+         subname = paste(DOhyp, pd, gs)) %>%
+  group_by(subname) %>%
+  # filter(DOhyp == 1) %>%
   filter(cons == max(cons)) %>%
   left_join(select(meta_geom, -site))
+
+
+x = ungroup(df_hyp_length) %>%
+  select(gs, geomorph, strahler, DOhyp, cons) %>%
+  mutate(match = ceiling(row_number() /2)) %>%
+  pivot_wider(names_from = DOhyp, values_from = cons)
+
+ggplot(data = x,
+       aes(x = strahler,
+           y = `1`,
+           group = strahler)) +
+  geom_boxplot() +
+  theme_bw() +
+  scale_y_continuous(limits = c(0, 30)) +
+  labs(x = "Strahler order",
+       y = "length of consecutive hypoxia (hours)")
+
+group_by(x, geomorph) %>%
+  summarize(m = mean(`1`, na.rm = T),
+            sd = sd(`1`, na.rm = T))
+
 
 p_len_cons_hyp <- ggplot(data = df_hyp_length,
        aes(x = strahler,
@@ -400,13 +476,52 @@ ggsave(filename = "Z:/RHypoxie/Figures/hypoxia_type_count.png",
 
 
 
+# Changes in amplitude ----------------------------------------------------
+df_amp <- df_dry_p %>%
+  group_by(gs, date, site) %>%
+  summarize(amp_DO = max(DO) - min(DO),
+            amp_temp = max(DO_temp) - min(DO_temp)) %>%
+  ungroup() %>%
+  pivot_longer(cols = starts_with("amp")) %>%
+  group_by(site, gs, name) %>%
+  mutate(dayno = row_number() - 1) %>%
+  nest() %>%
+  mutate(mod = map(data, ~lm(value~dayno, data = .)),
+         t = map(mod, broom::tidy)) %>%
+  select(t) %>%
+  unnest(cols = t)
+
+
+df_amp_w <- df_amp %>%
+  pivot_wider(names_from = term, values_from = estimate:p.value)
+
+p_hist_amp <- df_amp_w %>%
+  filter(name == "amp_DO",
+         p.value_dayno < 0.05) %>%
+  ggplot(aes(x = estimate_dayno)) +
+  geom_density(fill = "red", alpha = 0.5) +
+  theme_bw() +
+  geom_vline(aes(xintercept = median(estimate_dayno, na.rm = T))) +
+  labs(x = expression("rate of amplitude increase (mg "*L^{-1}~d^{-1}*")"))
+p_hist_amp
+
+ungroup(df_amp_w) %>%
+  filter(name == "amp_DO",
+         p.value_dayno < 0.05) %>%
+  summarize(mean = mean(estimate_dayno),
+            sd = sd(estimate_dayno))
+
+df_amp %>%
+  filter(term == "dayno") %>%
+  select(name, estimate) %>%
+  pivot_wider(names_from = name, values_from = estimate) %>%
+  ggplot(aes(amp_temp, amp_DO)) +
+  geom_point()
 
 
 
 
-
-
-
+# Old ---------------------------------------------------------------------
 
 
 
