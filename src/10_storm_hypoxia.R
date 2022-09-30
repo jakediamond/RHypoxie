@@ -57,6 +57,28 @@ saveRDS(df_storm_final, file.path("data", "10_clean_data", "hypoxia_storm_new.RD
 df_storm_final <- readRDS(file.path("data", "10_clean_data", "hypoxia_storm_new.RDS"))
 
 
+# General stats -----------------------------------------------------------
+# Total number of site events
+nrow(distinct(df_storm_final, sitegroup))
+
+# Total number of site events that led to hypoxia
+df_storm_final %>%
+  mutate(hyp = if_else(DO<3,1,0)) %>%
+  group_by(sitegroup) %>%
+  summarize(hypt= sum(hyp, na.rm = T)) %>%
+  filter(hypt > 0) %>%
+  nrow()
+
+# Total number of site events that led to hypoxia by strahler
+df_storm_final %>%
+  mutate(hyp = if_else(DO<3,1,0)) %>%
+  group_by(sitegroup, strahler) %>%
+  summarize(hypt= sum(hyp, na.rm = T)) %>%
+  filter(hypt > 0) %>%
+  group_by(strahler) %>%
+  summarize(n = n())
+
+
 # Plotting theme ----------------------------------------------------------
 # theme for discharge plots
 p_theme_q <- 
