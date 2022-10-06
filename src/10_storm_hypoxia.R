@@ -56,7 +56,6 @@ df_storm_final <- df_storm %>%
 saveRDS(df_storm_final, file.path("data", "10_clean_data", "hypoxia_storm_new.RDS"))
 df_storm_final <- readRDS(file.path("data", "10_clean_data", "hypoxia_storm_new.RDS"))
 
-
 # General stats -----------------------------------------------------------
 # Total number of site events
 nrow(distinct(df_storm_final, sitegroup))
@@ -64,6 +63,7 @@ nrow(distinct(df_storm_final, sitegroup))
 # Total number of site events that led to hypoxia
 df_storm_final %>%
   mutate(hyp = if_else(DO<3,1,0)) %>%
+  filter(time > -6/24) %>% #only want to consider hypoxia after the storm (or just before)
   group_by(sitegroup) %>%
   summarize(hypt= sum(hyp, na.rm = T)) %>%
   filter(hypt > 0) %>%
@@ -72,12 +72,49 @@ df_storm_final %>%
 # Total number of site events that led to hypoxia by strahler
 df_storm_final %>%
   mutate(hyp = if_else(DO<3,1,0)) %>%
+  filter(time > -6/24) %>% #only want to consider hypoxia after the storm (or just before)
   group_by(sitegroup, strahler) %>%
   summarize(hypt= sum(hyp, na.rm = T)) %>%
   filter(hypt > 0) %>%
   group_by(strahler) %>%
   summarize(n = n())
 
+# Length of hypoxia
+df_rls <- df_storm_final %>%
+  group_by(sitegroup) %>%
+  arrange(sitegroup, datetime) %>%
+  mutate(DOhyp = if_else(DO<3,1,0),
+         hyp_l = sequence(rle(DOhyp)$lengths),
+         hyp_change = if_else(((lag(DOhyp, default = 0) != DOhyp) &
+                                 (lag(DOhyp, 2, default = 0) != DOhyp)), 
+                              1, 0))
+
+# Sites that were hypoxic before the storm
+df_hyp_bef <- ungroup(df_rls) %>%
+  group_by(sitegroup) %>%
+  filter(time <0) %>%
+  summarize(hypbefore = if_else(sum(DOhyp, na.rm = T) == 0, 0, 1))
+
+# Sites that were hypoxic before the storm and oxic at the storm pulse
+df_reox <- filter(df_hyp_bef, hypbefore ==1) %>%
+  left_join(df_storm_final)
+
+# Median lengths of hypoxia
+df_hyp_len <- left_join(df_rls, df_hyp_bef) %>%
+  filter(hypbefore == 0,
+         time > 0,
+         DOhyp == 1) %>%
+  ungroup() %>%
+  group_by(sitegroup) %>%
+  mutate(hyp_pd = cumsum(replace_na(hyp_change, 0))) %>%
+  ungroup() %>%
+  group_by(sitegroup, hyp_pd) %>%
+  filter(hyp_pd == 1) %>%
+  filter(hyp_l == max(hyp_l)) %>%
+  ungroup() %>%
+  summarize(hyp_len_med = median(hyp_l, na.rm = T),
+            mean = mean(hyp_l, na.rm = T),
+            sd = sd(hyp_l, na.rm = T))
 
 # Plotting theme ----------------------------------------------------------
 # theme for discharge plots
@@ -98,49 +135,63 @@ layout <- c(
   area(t = 1, l = 1, b = 8, r = 4),
   area(t = 6, l = 1, b = 8, r = 4)
 )
-
-
-
-
-
 # Storms ------------------------------------------------------------------
-
+# Get ready to plot
 df_st_p <- df_storm_final %>%
   mutate(DOhyp = if_else(DO < 3, 1, 0)) %>%
-  filter(sum(DOhyp) > 1) %>%
+  filter(sum(DOhyp, na.rm = T) > 1) %>%
   ungroup() %>%
-  # group_by(sitegroup) %>%
   group_by(sitegroup, date) %>%
   mutate(color = min(DO) == DO,
          color = if_else(is.na(color), FALSE, color),
-         gs = paste(group, site)) %>%
+         gs = paste(group, site),
+         maxq = max(q_mmd)) %>%
   left_join(select(meta_geom, -site))
 
+# Choose the events to plot
+ps <- c("1coi071", "1loi068", "4loi068", #riffle
+        "2ard046", "2coi023", "12mor009", #pool
+        "2ard008", "3mar233", "5fon013" #run
+        )
 
-ggplot() +
-  geom_line(data = filter(df_st_p, month(start) == 7),
+# Text to avoid facet strips
+ann_text <- data.frame(time = -2.5, DO = 4, 
+                       label = c("pool", "riffle", "run"),
+                       geomorph = c("pool", "riffle", "run"))
+
+# Plot
+p_geomorph <- ggplot() +
+  geom_line(data = filter(df_st_p, sitegroup %in% ps),
             aes(x = time,
                 y = DO, group = sitegroup,
-                color = geomorph),
+                color = q_mmd / 24),
             alpha = 0.7,
             size = 1.2) +
-  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  facet_wrap(~geomorph, scales = "free_x")+
+  geom_hline(yintercept = 3, linetype = "dashed") +
+  facet_grid(rows = "geomorph") +
+  scale_x_continuous(breaks = seq(-3,8, 1)) +
   geom_vline(xintercept = 0) +
-  # scale_color_manual(values = "blue") +
+  scale_color_gradient(trans = "log10") +
+  geom_text(data = ann_text,
+            aes(x = time, y = DO, label = label)) +
   theme_bw() +
-  # theme() +
-  labs(title = "7 unique storm events leading to hypoxia",
-       x = "days after storm",
-       y = "DO (mg/L)")
+  theme(legend.position = "none",
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+  labs(x = "days after storm",
+       y = expression("DO (mg "*L^{-1}*")"))
 
+p_geomorph
+# ggsave(filename = file.path("results", "Figures", "storm_summaries", "storm_hypoxia_mgl_geomorph_facet.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 16,
+#        units = "cm")
 
-ggsave(filename = file.path("results", "Figures", "storm_summaries", "storm_hypoxia_mgl_geomorph_facet.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 16,
-       units = "cm")
-
+# Calculate drop rates ----------------------------------------------------
 # Dissolved oxygen at the beginning and lowest value for each flushing flow
 df_diff <- df_st_p %>%
   group_by(sitegroup) %>%
@@ -152,33 +203,38 @@ df_diff <- df_st_p %>%
   pivot_wider(names_from = type, values_from = c(DO, DO_per, time)) %>%
   left_join(distinct(select(ungroup(df_st_p), sitegroup, strahler, geomorph))) %>%
   mutate(drop = DO_begin - DO_end)
-  
-p_drop <- ggplot(data = df_diff) +
-  geom_segment(aes(y = DO_begin, x = time_begin,
-                   yend = DO_end, xend = time_end,
-                   color = drop),
-               size = 1) + 
-  geom_point(aes(y = DO_begin, x = time_begin,
-                   # yend = DO_end, xend = time_end,
-                   color = drop),
-               size = 1) +
-  geom_point(aes(y = DO_end, x = time_end,
-                 # yend = DO_end, xend = time_end,
-                 color = drop),
-             size = 1) +
-  # facet_wrap(~geomorph) +
-  theme_bw() +
-  scale_color_viridis_c(name = "DO drop") +
-  labs(x = "days since peak flow",
-       y = expression("dissolved oxygen (mg "*L^{-1}*")"))
-p_drop
-ggsave(plot = p_drop, 
-       filename = file.path("results", "Figures", "storm_summaries", "storm_drop_summary.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 12.4,
-       units = "cm")
 
+
+# text for figure
+drop_txt <- ungroup(df_diff) %>%
+  summarize(mean = mean(drop / time_end, na.rm = T),
+            median = median(drop / time_end, na.rm = T),
+            sd = sd(drop / time_end, na.rm = T)) %>%
+  transmute(x = 5, y = 0.3,
+            txt = paste0("median = ",round(median,1),
+                         "\n", "mean±sd = ",
+                         round(mean,1), "±", round(sd,1)))
+
+# histogram of drop rates
+p_hist_droprates <- ggplot(data = df_diff,
+                           aes(x = drop / time_end)) +
+  geom_density(fill = "red", alpha = 0.5) + 
+  theme_bw() +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0,10,1)) +
+  geom_vline(aes(xintercept = median(drop/time_end, na.rm = T))) +
+  geom_text(data=drop_txt, aes(x =x, y =y, label = txt)) +
+  labs(x = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"),
+       y = "density")
+p_hist_droprates
+# ggsave(plot = p_hist_droprates, 
+#        filename = file.path("results", "Figures", "storm_summaries", "storm_droprate_hist.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 9.2,
+#        units = "cm")
+
+
+# Interstorm and storm metrics --------------------------------------------
 # Time between storms
 df_storm_summary <- meta_storm %>%
   group_by(siteq, year) %>%
@@ -193,7 +249,7 @@ df_sp1 <- ungroup(df_st_p) %>%
   select(q_min, q_max) %>%
   distinct()
 
-# storm pulse increase 
+# storm pulse increase 2 hours before storm to storm peak
 df_sp2 <- ungroup(df_st_p) %>%
   group_by(sitegroup) %>%
   filter(time == 0 | time == -2/24) %>%
@@ -203,10 +259,10 @@ df_sp2 <- ungroup(df_st_p) %>%
   distinct()
 
 
-
-
 # Time until hypoxia
 df_th_st <- ungroup(df_st_p) %>%
+  left_join(df_hyp_bef) %>%
+  filter(hypbefore == 0) %>%
   group_by(sitegroup) %>%
   filter(time >= 0) %>%
   filter(DOhyp == 1) %>%
@@ -216,21 +272,13 @@ df_th_st <- ungroup(df_st_p) %>%
   left_join(df_sp2) %>%
   left_join(df_storm_summary)
 
-# histogram of drop rates
-p_hist_droprates <- ggplot(data = df_diff,
-       aes(x = drop / time_end))+
-  geom_density(fill = "red", alpha = 0.5) + 
-  theme_bw() +
-  scale_x_continuous(limits = c(0, 10), breaks = seq(0,10,1)) +
-  geom_vline(aes(xintercept = median(drop/time_end, na.rm = T))) +
-  labs(x = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"))
-
-ggsave(plot = p_hist_droprates, 
-       filename = file.path("results", "Figures", "storm_summaries", "storm_droprate_hist.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 9.2,
-       units = "cm")
+# Some stats for text
+ungroup(df_th_st) %>%
+  summarize(mean = mean(time*24, na.rm = T),
+            sd = sd(time*24, na.rm = T),
+            median = median(time*24, na.rm = T),
+            min = min(time*24, na.rm = T),
+            max = max(time*24, na.rm = T))
 
 # histogram of drops
 p_hist_timehyp <- ggplot(data = df_th_st,
@@ -241,19 +289,19 @@ p_hist_timehyp <- ggplot(data = df_th_st,
   geom_vline(aes(xintercept = median(time, na.rm = T))) +
   labs(x = "time until hypoxia (days)")
 
-ggsave(plot = p_hist_timehyp, 
-       filename = file.path("results", "Figures", "storm_summaries", "storm_timehyp_hist.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 9.2,
-       units = "cm")
+# ggsave(plot = p_hist_timehyp, 
+#        filename = file.path("results", "Figures", "storm_summaries", "storm_timehyp_hist.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 9.2,
+#        units = "cm")
 
 df_mod <- df_th_st %>%
   select(sitegroup, time, start.date, interstorm_d, q_max, q_min, q_change) %>%
   right_join(df_diff)
 
 # time until hypoxia as function of storm pulse
-ggplot(data = df_mod,
+p_change <- ggplot(data = df_mod,
        aes(x = interstorm_d,
            y = drop,
            color = geomorph,
@@ -269,6 +317,9 @@ ggsave(filename = file.path("results", "Figures", "storm_summaries", "drop_expla
        height = 9.2,
        width = 12.4,
        units = "cm")
+
+
+p_geomorph | (p_hist_droprates / p_change)
 
 
 
@@ -305,14 +356,14 @@ p_q
 
 p_do + p_q + plot_layout(design = layout)
 
-
 # Event look along network ------------------------------------------------
 plot_fun <- function(startdate, enddate) {
   # data %>%
   df_event = df %>%
     filter(between(datetime,
-                   startdate,
-                   enddate)) %>%
+                   startdate+hours(10),
+                   enddate - hours(10)),
+           watershed == "Coise") %>%
     # filter(!(site %in% c("ardevel amont vernus",
     #                      "vernus",
     #                      "ardevel aval vernus",
@@ -334,20 +385,30 @@ plot_fun <- function(startdate, enddate) {
   
   a1 = ggplot(data = df_event,
               aes(x = datetime,
-                  y = DO_per,
-                  color = log(area_km2),
+                  y = DO,
+                  color = area_km2,
                   group = site)) +
-    geom_line(size = 1.2, alpha = 0.5)+
-    facet_wrap(~watershed, nrow = 1) + 
+    geom_line(size = 1, alpha = 0.5)+
+    geom_hline(yintercept = 3, linetype = "dashed") +
+    # facet_wrap(~watershed, nrow = 1) + 
     scale_x_datetime(date_breaks = "2 days",
                      date_labels = "%m/%d") +
     # facet_wrap(~fct_reorder(site, number))+
-    scale_color_viridis_c()+
-    labs(y = "DO (% sat.)",
-         title = ymd(startdate)) +
+    scale_color_viridis_c(expression("area ("*km^2*")"),
+                          guide = guide_colourbar(direction = "horizontal",
+                                                  title.position = "top",
+                                                  title.hjust = 0.5,
+                                                  barheight = 0.8))+
+    # guide_colorbar(color = colorbar())
+    labs(y = expression("DO (mg "*L^{-1}*")")) +
+         # title = ymd(startdate)) +
     theme_bw() +
     theme(axis.title.x = element_blank(),
-          legend.position = "bottom")
+          legend.position = c(0.5, 0.93),
+          legend.background = element_rect(fill = "transparent"),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.major.y = element_blank())
   
   a2 = ggplot(data = df_event,
               aes(x = datetime,
@@ -355,7 +416,7 @@ plot_fun <- function(startdate, enddate) {
                   color = log(area_km2),
                   group = site)) +
     geom_line(size = 1.2, alpha = 0.5)+
-    facet_wrap(~watershed, nrow = 1) + 
+    # facet_wrap(~watershed, nrow = 1) + 
     scale_x_datetime(date_breaks = "2 days",
                      date_labels = "%m/%d") +
     # facet_wrap(~fct_reorder(site, number))+
@@ -367,14 +428,17 @@ plot_fun <- function(startdate, enddate) {
   b1 = ggplot(data = distinct(df_event, watershed, site, datetime, q_mmd),
               aes(x = datetime,
                   y = q_mmd,
+                  color = q_mmd,
                   group = site)) +
-    geom_line(color = "blue") +
+    scale_color_gradient(trans = "log10") +
+    geom_line(size = 1) +
     scale_y_continuous(position = "right") +
-    facet_wrap(~watershed, nrow = 1) +
+    # facet_wrap(~watershed, nrow = 1) +
     # facet_wrap(~fct_reorder(site, number))+
     theme_minimal() +
-    labs(y = expression("q (mm"~h^{-1}*")")) +
-    theme(panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
+    labs(y = expression("q (mm"~d^{-1}*")")) +
+    theme(legend.position = "none",
+          panel.background = element_rect(fill='transparent', color = NA), #transparent panel bg
           plot.background = element_rect(fill='transparent', color=NA), #transparent plot bg
           panel.grid.major = element_blank(), #remove major gridlines
           panel.grid.minor = element_blank(), #remove minor gridlines
@@ -390,7 +454,7 @@ plot_fun <- function(startdate, enddate) {
                     y = rain_mm)) +
       geom_col() +
       scale_y_reverse(position = "right") +
-      facet_wrap(~watershed, nrow = 1) +
+      # facet_wrap(~watershed, nrow = 1) +
       labs(y = expression("rain (mm"~h^{-1}*")")) +
       # facet_wrap(~fct_reorder(site, number))+
       theme_minimal() +
@@ -430,14 +494,18 @@ plot_fun <- function(startdate, enddate) {
   #        units = "cm")
 }
 
-plot_fun(meta_storm$start[63], meta_storm$end[63])
+p_storm_a <- plot_fun(meta_storm$start[8], meta_storm$end[8])
+p_storm_a
+(p_storm_a / p_hist_droprates) | p_geomorph
+
+p_geomorph | (p_hist_droprates / p_drop)
 
 
-ggsave(filename = file.path("results", "Figures", "storm_event_examples", "20200419_Loire.png"),
-       dpi = 1200,
-       width = 22,
-       height = 16,
-       units = "cm")
+# ggsave(filename = file.path("results", "Figures", "storm_event_examples", "20200419_Loire.png"),
+#        dpi = 1200,
+#        width = 22,
+#        height = 16,
+#        units = "cm")
 
 # timing of do max and min ------------------------------------------------
 
@@ -625,4 +693,29 @@ df_st <- ungroup(df) %>%
 #   geom_line() +
 #   theme_bw()
 
-
+# 
+# p_drop <- ggplot(data = df_diff) +
+#   geom_segment(aes(y = DO_begin, x = time_begin,
+#                    yend = DO_end, xend = time_end,
+#                    color = drop),
+#                size = 1) + 
+#   geom_point(aes(y = DO_begin, x = time_begin,
+#                  # yend = DO_end, xend = time_end,
+#                  color = drop),
+#              size = 1) +
+#   geom_point(aes(y = DO_end, x = time_end,
+#                  # yend = DO_end, xend = time_end,
+#                  color = drop),
+#              size = 1) +
+#   # facet_wrap(~geomorph) +
+#   theme_bw() +
+#   scale_color_viridis_c(name = "DO drop") +
+#   labs(x = "days since peak flow",
+#        y = expression("dissolved oxygen (mg "*L^{-1}*")"))
+# p_drop
+# ggsave(plot = p_drop, 
+#        filename = file.path("results", "Figures", "storm_summaries", "storm_drop_summary.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 12.4,
+#        units = "cm")
