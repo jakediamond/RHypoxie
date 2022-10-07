@@ -7,6 +7,8 @@
 library(lubridate)
 library(scales)
 library(readxl)
+library(brooom)
+library(rstatix)
 library(patchwork)
 library(tidyverse)
 
@@ -89,6 +91,7 @@ df_rls <- df_storm_final %>%
                                  (lag(DOhyp, 2, default = 0) != DOhyp)), 
                               1, 0))
 
+# Characterizing storm responses ------------------------------------------
 # Sites that were hypoxic before the storm
 df_hyp_bef <- ungroup(df_rls) %>%
   group_by(sitegroup) %>%
@@ -97,8 +100,71 @@ df_hyp_bef <- ungroup(df_rls) %>%
 
 # Sites that were hypoxic before the storm and oxic at the storm pulse
 df_reox <- filter(df_hyp_bef, hypbefore ==1) %>%
-  left_join(df_storm_final)
+  left_join(df_storm_final) %>%
+  filter(between(time, 0, 6/24), DO >=3) %>%
+  distinct(site, group, strahler) %>%
+  mutate(stormtype = "hyp_ox")
 
+# Sites that exhibited no change before or after the storm
+df_nodif <- df_storm_final %>%
+  mutate(befaf = if_else(time < 0, "before", "after")) %>%
+  filter(between(time,-3,3)) %>%
+  group_by(sitegroup, date, befaf) %>%
+  summarize(mean = mean(DO, na.rm = T),
+            amp = max(DO, na.rm = T) - min(DO, na.rm = T)) %>%
+  group_by(sitegroup) %>%
+  drop_na() %>%
+  filter(sum(befaf == "before") >2, sum(befaf == "after") > 2) %>%
+  ungroup()
+
+df_ampdif <- df_nodif %>%
+  group_by(sitegroup) %>%
+  t_test(amp~befaf)
+
+df_meandif <- df_nodif %>%
+  group_by(sitegroup) %>%
+  t_test(mean~befaf)
+
+df_nodifsum <- df_nodif %>%
+  group_by(sitegroup, befaf) %>%
+  summarize(meanDO = mean(mean, na.rm = T),
+            meanamp = mean(amp, na.rm = T)) %>%
+  pivot_longer(cols = c(meanDO, meanamp), names_to = "type") %>%
+  pivot_wider(names_from = befaf, values_from = value) %>%
+  left_join(select(df_ampdif, sitegroup, p) %>%
+              mutate(type = "meanamp")) %>%
+  rows_update(select(df_meandif, sitegroup, p) %>%
+              mutate(type = "meanDO"),
+            by = c("sitegroup", "type")) %>%
+  mutate(dif = if_else(after > before, "+", "-"),
+         sig = if_else(p < 0.01, "sig", "ns"))
+
+# Try to categorize every event
+df_cat <- df_nodifsum %>%
+  mutate(cat = case_when(sig == "ns" ~ "no change",
+                             sig == "sig" ~ paste0(type, dif),
+                             TRUE ~ NA_character_
+                             )
+            ) %>%
+  ungroup() %>%
+  group_by(sitegroup) %>%
+  summarize(category = paste0(cat))
+  # summarize(type = if_else(sum(sig == "ns") == 2, "nochange",
+  #                          if_else(sum(sig == "sig") == 2,
+  #                                  if_else(type == "meanDO" & dif == "greater",
+  #                                          if_else(type == "meanamp" & dif == "greater",
+  #                                                  "DO+amp+",
+  #                                                  "DO+amp-"),
+  #                                          if_else(type == "meanamp" & dif == "greater",
+  #                                                  "DO-amp+",
+  #                                                  "DO-amp-"),
+  #                                          NA_character_
+  #                                          )
+  #                                  )
+  #                          )
+  # )
+  
+# Calculating hypoxia metrics ---------------------------------------------
 # Median lengths of hypoxia
 df_hyp_len <- left_join(df_rls, df_hyp_bef) %>%
   filter(hypbefore == 0,
@@ -158,6 +224,8 @@ ps <- c("1coi071", "1loi068", "4loi068", #riffle
 ann_text <- data.frame(time = -2.5, DO = 4, 
                        label = c("pool", "riffle", "run"),
                        geomorph = c("pool", "riffle", "run"))
+
+# Color by response type
 
 # Plot
 p_geomorph <- ggplot() +
