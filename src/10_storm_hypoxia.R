@@ -148,7 +148,8 @@ df_cat <- df_nodifsum %>%
             ) %>%
   ungroup() %>%
   group_by(sitegroup) %>%
-  summarize(category = paste0(cat))
+  select(type, cat) %>%
+  pivot_wider(names_from = type, values_from = cat)
   # summarize(type = if_else(sum(sig == "ns") == 2, "nochange",
   #                          if_else(sum(sig == "sig") == 2,
   #                                  if_else(type == "meanDO" & dif == "greater",
