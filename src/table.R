@@ -34,7 +34,8 @@ ungroup(df) %>%
   group_by(watershed) %>% 
   summarize(hy = sum(DOhyp, na.rm = T),
             n = n(),
-            per = hy / n)
+            per = round(hy / n *100,1)) %>%
+  select(per)
 
 # Hypoxia by strahler order and watershed ---------------------------------
 df_hyp_per <- ungroup(df) %>%
@@ -63,11 +64,12 @@ df_hyp_len <- ungroup(df_hyp_rls) %>%
   filter(hyp_l == max(hyp_l)) %>%
   ungroup() %>%
   filter(between(hyp_l, quantile(hyp_l, 0.01), quantile(hyp_l, 0.99))) %>%
-  # group_by(strahler) %>%
+  group_by(watershed) %>%
   # ungroup() %>%
   summarize(#hyp_len_med = median(hyp_l),
-            hyp_len_mean = min(hyp_l),
-            sd_len = max(hyp_l))
+            le = round(mean(hyp_l)),
+            sd = round(sd(hyp_l)))
+pull(df_hyp_len,sd)
 
 # Median timing between hypoxic events
 df_hyp_diff <- ungroup(df_hyp_rls) %>%
@@ -85,9 +87,9 @@ df_hyp_diff <- ungroup(df_hyp_rls) %>%
 
 # Number of hypoxia periods
 df_hyp_pds <- df_hyp_rls %>%
-  group_by(strahler, year) %>%
+  group_by(watershed) %>%
   summarize(pds = max(hyp_pd, na.rm = T))
-
+pull(df_hyp_pds,pds)
 # probability of nighttime hypoxia given hypoxia
 df_hyp_night <- df %>%
   filter(DOhyp == 1) %>%

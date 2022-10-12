@@ -36,7 +36,9 @@ df <- df %>%
                          1, 
                          0)) #define hypoxia as less than 3 mg/Lsaturation 
 
+# Load predictor variables
 df_preds <- readRDS(file.path("data", "predictor_variables.RDS"))
+
 # Logistic regression -----------------------------------------------------
 # Get rid of 0 flows to take log discharge
 df_mod <- mutate(df, logq = if_else(q_mmd >0, log(q_mmd), log(q_mmd+0.001))) %>%
@@ -95,87 +97,116 @@ roc.curve(df_test$DOhyp, pred.tree.both[,2])
 
 summary(tree.both)
 rpart.plot(tree.both)
-rpart.rules(tree.both, extra = 4, cover = TRUE)
+# rpart.rules(tree.both, extra = 4, cover = TRUE)
+# Save file
+png(filename = file.path("results", "Figures", 
+                         "classification_trees", "hypoxia.png"),
+    width = 18,
+    height = 12,
+    units = "cm",
+    res = 600
+    )
+rpart.plot(tree.both)
+dev.off()
 # Make predictions
 mod_probs <- pred.tree.both[,2]
 pred_classes <- ifelse(mod_probs > 0.5, 1, 0)
+
 # Model accuracy
 mean(pred_classes == df_test$DOhyp)
 
+# accuracy and sensitivity
+df_ac <- tibble(obs = df_test$DOhyp, 
+                pred = pred_classes) %>%
+  mutate(obs = if_else(obs == 0, "oxic", "hypoxic"),
+         pred = if_else(pred == 0, "oxic", "hypoxic"))
+df_ac$obs <- as.factor(df_ac$obs)
+df_ac$pred <- as.factor(df_ac$pred)
 
+twoClassSummary(as.data.frame(df_ac), lev = c("hypoxic", "oxic"))
 
-
+# Holdout to Check for variance inflation
 ROSE.holdout <- ROSE.eval(DOhyp ~ ., data = df_train, learner = rpart, 
                           method.assess = "holdout", 
                           control.learner = list(method = "class"),
                           extr.pred = function(obj)obj[,2], seed = 42)
 ROSE.holdout
+# Roughly the same as we find with the testing, all good
+
+# Continuous rpart --------------------------------------------------------
+# Get rid of 0 flows to take log discharge
+df_mod2 <- mutate(df, logq = if_else(q_mmd >0, log(q_mmd), log(q_mmd+0.001))) %>%
+  drop_na(DO, temp, logq) %>%
+  left_join(df_preds) %>%
+  select(DO, logq, temp, strahler, slope, geomorph, rad_wm2) %>%
+  mutate(geomorph = as.factor(geomorph))
+
+# Split the data into training and test set
+training.samples2 <- df_mod2$DO %>% 
+  createDataPartition(p = 0.7, list = FALSE)
+df_train2  <- df_mod2[training.samples2, ]
+df_test2 <- df_mod2[-training.samples2, ]
+
+# Continous rpart
+mod_con <- rpart(DO ~ ., data = df_train2)
+pred_mod_con <- predict(mod_con, newdata = df_test2)
+rpart.plot(mod_con)
+summary(mod_con)
+mean((pred_mod_con - df_test2$DO)^2)^0.5
+mean(df_test2$DO - pred_mod_con)
+postResample(pred = pred_mod_con, obs = df_test2$DO)
 
 
+# Save file
+png(filename = file.path("results", "Figures", 
+                         "classification_trees", "DO_regression.png"),
+    width = 18,
+    height = 12,
+    units = "cm",
+    res = 600
+)
+rpart.plot(mod_con)
+dev.off()
+
+# Logistic regression -----------------------------------------------------
+# Try logisitic regression
 # Model on balanced dataset
 modelbal<- glm(DOhyp ~ logq + temp, 
-               data = train.data2, family = binomial)
+               data = df_ou, family = binomial)
 summary(modelbal)
-
+plot(modelbal)
 
 # roc.curve(test.data$DOhyp, pred.treeimb[,2], plotit = F)
 
 # Make predictions
-probabilitiesbal <- modelbal %>% predict(test.data2, type = "response")
+probabilitiesbal <- modelbal %>% predict(df_un, type = "response")
 predicted.classesbal <- ifelse(probabilitiesbal > 0.5, 1, 0)
-# Model accuracy
-mean(predicted.classesbal == test.data2$DOhyp)
 
-train.data2 %>%
+# Model accuracy
+mean(predicted.classesbal == df_un$DOhyp)
+
+# Confusion matrix
+preds <- ifelse(predicted.classesbal == 0, "oxic", "hypoxic") %>%
+  as.factor()
+obs <- ifelse(df_un$DOhyp == 0, "oxic", "hypoxic") %>%
+  as.factor()
+confusionMatrix(preds, obs)
+
+# Plot
+p_log <- df_ou %>%
   ggplot(aes(temp, DOhyp, color = logq)) +
   geom_point(alpha = 0.2) +
-  scale_color_viridis_c()+
+  theme_classic() +
+  scale_color_viridis_c(option = "magma",
+                        name = "ln(q)") +
   geom_smooth(method = "glm", method.args = list(family = "binomial")) +
-  labs(
-    title = "Logistic Regression Model", 
-    x = "specific discharge",
-    y = "hypoxia prob."
-  )
+  labs(x = "stream temperature (°C)",
+       y = "hypoxia probability")
 
-
-roc.curve(train.data2$DOhyp, probabilitiesbal,
-          main="ROC curve \n (Half circle depleted data)")
-
-
-roc.curve(test.data2$DOhyp, predicted.classesbal,  col=2,
-          lwd=2, lty=2)
-
-
-roc.curve(test.data$DOhyp, predicted.classes)
-
-treeimb <- rpart(DOhyp ~ temp+logq, data = df_bal)
-pred.treeimb <- predict(treeimb, newdata = test.data2)
-accuracy.meas(test.data2$DOhyp, pred.treeimb)
-roc.curve(test.data2$DOhyp, pred.treeimb, plotit = F)
-
-
-
-
-# Binomial model on balanced dataset
-model_bin<- glm(DOhyp ~ temp + slope + logq, 
-               data = df_ou, family = binomial)
-summary(model_bin)
-
-# Make predictions
-probabilitiesbal <- model_bin %>% predict(df_test, type = "response")
-predicted.classesbal <- ifelse(probabilitiesbal > 0.5, 1, 0)
-# Model accuracy
-mean(predicted.classesbal == df_test$DOhyp)
-
-df_ou %>%
-  ggplot(aes(temp, DOhyp, color = logq)) +
-  # geom_point(alpha = 0.2) +
-  scale_color_viridis_c()+
-  geom_smooth(method = "glm", method.args = list(family = "binomial")) +
-  labs(
-    title = "Logistic Regression Model", 
-    x = "specific discharge",
-    y = "hypoxia prob."
-  )
-
-roc.curve(df_test$DOhyp, predicted.classesbal)
+ggsave(plot = p_log,
+       filename = file.path("results", "Figures", "classification_trees",
+                            "logistic_regression.png"),
+       dpi = 600,
+       width = 13,
+       height = 9.2,
+       units = "cm")

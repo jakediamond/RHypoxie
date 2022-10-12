@@ -7,7 +7,7 @@
 library(lubridate)
 library(scales)
 library(readxl)
-library(brooom)
+library(broom)
 library(rstatix)
 library(patchwork)
 library(tidyverse)
@@ -62,13 +62,16 @@ df_storm_final <- readRDS(file.path("data", "10_clean_data", "hypoxia_storm_new.
 # Total number of site events
 nrow(distinct(df_storm_final, sitegroup))
 
-# Total number of site events that led to hypoxia
-df_storm_final %>%
+# Events that led to hypoxia
+df_hyp_evs <- df_storm_final %>%
   mutate(hyp = if_else(DO<3,1,0)) %>%
   filter(time > -6/24) %>% #only want to consider hypoxia after the storm (or just before)
   group_by(sitegroup) %>%
   summarize(hypt= sum(hyp, na.rm = T)) %>%
-  filter(hypt > 0) %>%
+  filter(hypt > 0)
+
+# Total number of site events that led to hypoxia
+df_hyp_evs %>%
   nrow()
 
 # Total number of site events that led to hypoxia by strahler
@@ -105,42 +108,51 @@ df_reox <- filter(df_hyp_bef, hypbefore ==1) %>%
   distinct(site, group, strahler) %>%
   mutate(stormtype = "hyp_ox")
 
-# Sites that exhibited no change before or after the storm
-df_nodif <- df_storm_final %>%
+# Get data for before and after storms
+df_befaf <- df_storm_final %>%
   mutate(befaf = if_else(time < 0, "before", "after")) %>%
-  filter(between(time,-3,3)) %>%
-  group_by(sitegroup, date, befaf) %>%
-  summarize(mean = mean(DO, na.rm = T),
-            amp = max(DO, na.rm = T) - min(DO, na.rm = T)) %>%
+  filter(between(time,-5,5)) %>%
+  mutate(day = round(time)) %>%
+  # drop_na(DO) %>%
+  # group_by(sitegroup, befaf, day) %>%
+  # summarize(mean = round(mean(DO), 1),
+  #           amp = round(max(DO) - min(DO), 1)) %>%
+  # group_by(sitegroup) %>%
+  # filter(sum(befaf == "before") > 2, sum(befaf == "after") > 2) %>%
+  # ungroup()
+  group_by(sitegroup, befaf) %>%
+  drop_na(DO) %>%
   group_by(sitegroup) %>%
-  drop_na() %>%
-  filter(sum(befaf == "before") >2, sum(befaf == "after") > 2) %>%
+  filter(sum(befaf == "before") >24, sum(befaf == "after") > 24) %>%
   ungroup()
 
-df_ampdif <- df_nodif %>%
+# T test on amplitudes
+df_DOdif <- df_befaf %>%
   group_by(sitegroup) %>%
-  t_test(amp~befaf)
+  t_test(DO~befaf)
 
-df_meandif <- df_nodif %>%
+# T test on mean DO
+df_vardif <- df_befaf %>%
   group_by(sitegroup) %>%
-  t_test(mean~befaf)
+  anova_test(DO~befaf)
 
-df_nodifsum <- df_nodif %>%
+# All the t test results
+df_befafsum <- df_befaf %>%
   group_by(sitegroup, befaf) %>%
-  summarize(meanDO = mean(mean, na.rm = T),
-            meanamp = mean(amp, na.rm = T)) %>%
-  pivot_longer(cols = c(meanDO, meanamp), names_to = "type") %>%
+  summarize(meanDO = mean(DO, na.rm = T),
+            meanvar = sd(DO, na.rm = T)) %>%
+  pivot_longer(cols = c(meanDO, meanvar), names_to = "type") %>%
   pivot_wider(names_from = befaf, values_from = value) %>%
   left_join(select(df_ampdif, sitegroup, p) %>%
-              mutate(type = "meanamp")) %>%
-  rows_update(select(df_meandif, sitegroup, p) %>%
+              mutate(type = "meanvar")) %>%
+  rows_update(select(df_DOdif, sitegroup, p) %>%
               mutate(type = "meanDO"),
             by = c("sitegroup", "type")) %>%
   mutate(dif = if_else(after > before, "+", "-"),
          sig = if_else(p < 0.01, "sig", "ns"))
 
 # Try to categorize every event
-df_cat <- df_nodifsum %>%
+df_cat <- df_befafsum %>%
   mutate(cat = case_when(sig == "ns" ~ "no change",
                              sig == "sig" ~ paste0(type, dif),
                              TRUE ~ NA_character_
@@ -149,22 +161,22 @@ df_cat <- df_nodifsum %>%
   ungroup() %>%
   group_by(sitegroup) %>%
   select(type, cat) %>%
-  pivot_wider(names_from = type, values_from = cat)
-  # summarize(type = if_else(sum(sig == "ns") == 2, "nochange",
-  #                          if_else(sum(sig == "sig") == 2,
-  #                                  if_else(type == "meanDO" & dif == "greater",
-  #                                          if_else(type == "meanamp" & dif == "greater",
-  #                                                  "DO+amp+",
-  #                                                  "DO+amp-"),
-  #                                          if_else(type == "meanamp" & dif == "greater",
-  #                                                  "DO-amp+",
-  #                                                  "DO-amp-"),
-  #                                          NA_character_
-  #                                          )
-  #                                  )
-  #                          )
-  # )
-  
+  pivot_wider(names_from = type, values_from = cat) %>%
+  mutate(stormtype = paste(meanDO,meanvar))
+
+# Summarize
+df_cat %>%
+  ungroup() %>%
+  anti_join(df_hyp_evs) %>%
+  group_by(stormtype) %>%
+  tally()
+
+df_stormtype <- df_cat %>%
+  semi_join(df_hyp_evs)
+
+df_stormtype %>%
+  group_by(stormtype) %>%
+  tally()
 # Calculating hypoxia metrics ---------------------------------------------
 # Median lengths of hypoxia
 df_hyp_len <- left_join(df_rls, df_hyp_bef) %>%
@@ -218,7 +230,7 @@ df_st_p <- df_storm_final %>%
 # Choose the events to plot
 ps <- c("1coi071", "1loi068", "4loi068", #riffle
         "2ard046", "2coi023", "12mor009", #pool
-        "2ard008", "3mar233", "5fon013" #run
+        "5viz062", "3mar233", "5fon013" #run
         )
 
 # Text to avoid facet strips
@@ -227,20 +239,22 @@ ann_text <- data.frame(time = -2.5, DO = 4,
                        geomorph = c("pool", "riffle", "run"))
 
 # Color by response type
+df_st_p <- left_join(df_st_p, df_cat, by = "sitegroup")
 
 # Plot
 p_geomorph <- ggplot() +
   geom_line(data = filter(df_st_p, sitegroup %in% ps),
             aes(x = time,
                 y = DO, group = sitegroup,
-                color = q_mmd / 24),
+                color = meanDO),
             alpha = 0.7,
             size = 1.2) +
   geom_hline(yintercept = 3, linetype = "dashed") +
   facet_grid(rows = "geomorph") +
   scale_x_continuous(breaks = seq(-3,8, 1)) +
   geom_vline(xintercept = 0) +
-  scale_color_gradient(trans = "log10") +
+  scale_color_manual(values = c("black", "#0072B2")) + 
+  # scale_color_gradient(trans = "log10") +
   geom_text(data = ann_text,
             aes(x = time, y = DO, label = label)) +
   theme_bw() +
@@ -250,7 +264,7 @@ p_geomorph <- ggplot() +
         panel.grid.minor.y = element_blank(),
         strip.background = element_blank(),
         strip.text = element_blank()) +
-  labs(x = "days after storm",
+  labs(x = "days after peak discharge",
        y = expression("DO (mg "*L^{-1}*")"))
 
 p_geomorph
@@ -273,6 +287,27 @@ df_diff <- df_st_p %>%
   left_join(distinct(select(ungroup(df_st_p), sitegroup, strahler, geomorph))) %>%
   mutate(drop = DO_begin - DO_end)
 
+# Better version
+df_diff2 <- left_join(df_storm_final, df_cat) %>%
+  ungroup() %>%
+  group_by(sitegroup) %>%
+  drop_na(DO) %>%
+  filter(meanDO != "nochange") %>%
+  filter(case_when(meanDO == "meanDO+" ~ ((between(time, -3, 0) & DO == min(DO)) |
+                                            (between(time, 0, 5) & DO == max(DO))),
+                   meanDO == "meanDO-" ~ ((between(time, -3, 0) & DO == max(DO)) |
+                                            (between(time, 0, 10) & DO == min(DO)))
+                   )
+         ) %>%
+  select(DO, start.date, time, meanDO) %>%
+  mutate(type = if_else(time == min(time), "begin", "end")) %>%
+  distinct() %>%
+  select(-time) %>%
+  ungroup() %>%
+  pivot_wider(names_from = type, values_from = DO, values_fn = min) %>%
+  # left_join(distinct(select(df_storm_final, sitegroup, strahler, geomorph))) %>%
+  mutate(drop = begin - end)
+
 
 # text for figure
 drop_txt <- ungroup(df_diff) %>%
@@ -287,8 +322,8 @@ drop_txt <- ungroup(df_diff) %>%
 # histogram of drop rates
 p_hist_droprates <- ggplot(data = df_diff,
                            aes(x = drop / time_end)) +
-  geom_density(fill = "red", alpha = 0.5) + 
-  theme_bw() +
+  geom_density(fill = "black", alpha = 0.5) + 
+  theme_classic() +
   scale_x_continuous(limits = c(0, 10), breaks = seq(0,10,1)) +
   geom_vline(aes(xintercept = median(drop/time_end, na.rm = T))) +
   geom_text(data=drop_txt, aes(x =x, y =y, label = txt)) +
@@ -319,7 +354,7 @@ df_sp1 <- ungroup(df_st_p) %>%
   distinct()
 
 # storm pulse increase 2 hours before storm to storm peak
-df_sp2 <- ungroup(df_st_p) %>%
+df_sp2 <- ungroup(df_storm_final) %>%
   group_by(sitegroup) %>%
   filter(time == 0 | time == -2/24) %>%
   mutate(q_change = max(q_mmd, na.rm = T) - min(q_mmd, na.rm = T),
@@ -329,17 +364,23 @@ df_sp2 <- ungroup(df_st_p) %>%
 
 
 # Time until hypoxia
-df_th_st <- ungroup(df_st_p) %>%
-  left_join(df_hyp_bef) %>%
-  filter(hypbefore == 0) %>%
-  group_by(sitegroup) %>%
-  filter(time >= 0) %>%
-  filter(DOhyp == 1) %>%
-  filter(time == min(time)) %>%
-  distinct() %>%
-  left_join(df_sp1) %>%
-  left_join(df_sp2) %>%
-  left_join(df_storm_summary)
+df_th_st <- left_join(df_storm_summary, select(df_storm_final,
+                                              start.date, start,
+                                              sitegroup, site) %>%
+                        distinct()) %>%
+  mutate(interstorm_d = if_else(is.na(interstorm_d), 0, interstorm_d)) %>%
+  left_join(df_sp2)
+  #ungroup() %>%
+  # left_join(df_hyp_bef) %>%
+  # filter(hypbefore == 0) %>%
+  # group_by(sitegroup) %>%
+  # filter(time >= 0) %>%
+  # filter(DOhyp == 1) %>%
+  # filter(time == min(time)) %>%
+  # distinct() %>%
+  # left_join(df_sp1) %>%
+  # left_join(df_sp2) %>%
+  # left_join(df_sp2, df_storm_summary)
 
 # Some stats for text
 ungroup(df_th_st) %>%
@@ -366,29 +407,39 @@ p_hist_timehyp <- ggplot(data = df_th_st,
 #        units = "cm")
 
 df_mod <- df_th_st %>%
-  select(sitegroup, time, start.date, interstorm_d, q_max, q_min, q_change) %>%
-  right_join(df_diff)
+  select(sitegroup, start.date, interstorm_d, q_change) %>%
+  right_join(df_diff2)
 
 # time until hypoxia as function of storm pulse
 p_change <- ggplot(data = df_mod,
        aes(x = interstorm_d,
-           y = drop,
-           color = geomorph,
+           y = -drop,
+           color = meanDO,
            size = q_change)) +
   geom_point() +
   theme_bw() +
+  geom_hline(yintercept = 0) +
+  scale_color_manual(values = c("black", "#0072B2")) +
+  stat_smooth() + 
+  theme(legend.position = "none") + 
   # geom_abline(intercept = 0, slope = 24) +
-  labs(y = "storm drop (mg/L)",
+  labs(y = expression("storm DO change (mg "*L^{-1}*")"),
        x = "time since last storm (days)")
        # x = expression("storm pulse (mm "*d^{-1}*")"))
-ggsave(filename = file.path("results", "Figures", "storm_summaries", "drop_explanation.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 12.4,
-       units = "cm")
+p_change
+# ggsave(filename = file.path("results", "Figures", "storm_summaries", "drop_explanation.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 12.4,
+#        units = "cm")
 
 
-p_geomorph | (p_hist_droprates / p_change)
+(p_geomorph | (p_hist_droprates / p_change)) + plot_annotation(tag_levels = "A")
+ggsave(filename = file.path("results", "Figures", "storm_summaries", "fig3.png"),
+              dpi = 1200,
+              height = 15,
+              width = 18,
+              units = "cm")
 
 
 

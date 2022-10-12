@@ -56,7 +56,29 @@ df_rewet <- df %>%
   group_by(site, group) %>%
   mutate(length = cumsum(oownum),
          type = if_else(group %% 2 != 0, "rewetting", "dry")) %>%
-  filter(group > 1 )
+  filter(group > 1)
+
+# How many total rewetting events
+df_rewet %>%
+  filter(type == "rewetting") %>%
+  mutate(sitegroup = paste0(group, site)) %>%
+  ungroup() %>%
+  distinct(site)
+
+# How many distinct sites
+df_rewet %>%
+  filter(type == "rewetting") %>%
+  mutate(sitegroup = paste0(group, site)) %>%
+  ungroup() %>%
+  distinct(site)
+
+# How many rewetting hypoxia
+df_rewet %>%
+  filter(type == "rewetting",
+         sum(DO<3,na.rm = T) > 0) %>%
+  mutate(sitegroup = paste0(group, site)) %>%
+  ungroup() %>%
+  distinct(site)
 
 # Data about duration and frequency of drying before rewetting
 meta_rewet <- df_rewet %>%
@@ -71,6 +93,16 @@ meta_rewet <- df_rewet %>%
 
 # only rewetting events
 df_events <- filter(ungroup(df_rewet), type == "rewetting")
+
+# Summary for text
+ungroup(meta_rewet) %>%
+  filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
+  summarize(meandur = mean(dur_dry/24, na.rm = T),
+            meanfreq = mean(freq_dry, na.rm = T),
+            sddur = sd(dur_dry/24, na.rm = T),
+            sdfreq = sd(freq_dry, na.rm = T))
+
+
 
 meta_rewet %>%
   filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
@@ -108,7 +140,7 @@ ggsave(plot = p_hist_droprates,
 
 
 # Plots -------------------------------------------------------------------
-df_re_p <-df_re %>%
+df_re_p <- df_events %>%
   distinct() %>%
   group_by(site) %>%
   # filter(oow == "no" | is.na(oow)) %>%
@@ -116,51 +148,65 @@ df_re_p <-df_re %>%
          year = year(datetime)) %>%
   mutate(group = cumsum(c(1, diff(datetime) > 1))) %>%
   group_by(site, group) %>%
-  mutate(hour = row_number() - 1) %>%
-  group_by(site, date, group) %>%
-  mutate(color = min(DO) == DO,
-         color = if_else(is.na(color), FALSE, color),
-         gs = paste(group, site))
+  mutate(hour = row_number() - 1,
+         sitegroup = paste0(group, site)) %>%
+  left_join(meta_geom)
 
-ggplot() +
-  geom_line(data = filter(df_re_p, gs!="3 charpassonne le tél"),
-            aes(x = hour,
-                y = DO, group = gs),
-            alpha = 0.5)+
-  # geom_point(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"),
-  #            aes(x = hour, y = DO, color = color)) +
-  # stat_smooth(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"), 
-  #             aes(x = hour, y = DO, group = gs),
-  #             method = "lm", se = FALSE) +
-  # ggpubr::stat_regline_equation(data = filter(df_dry_p, color == TRUE), 
-  #                               aes(x = hour, y = DO, group = gs)) +
-  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
-  facet_wrap(~site, scales = "free_x")+
-  scale_color_manual(values = "blue") +
+# Text to avoid facet strips
+ann_text <- data.frame(time = 0.5, DO = 10, 
+                       label = c("pool", "riffle", "run"),
+                       geomorph = c("pool", "riffle","run"))
+
+df_p <- ungroup(df_re_p) %>%
+  drop_na(geomorph) %>%
+  drop_na(DO) %>%
+  group_by(site, sitegroup, geomorph) %>%
+  filter(n() > 24, n() < 24*8, year == 2020, min(DO) < 5) %>%
+  nest() %>%
+  group_by(geomorph) %>%
+  slice_sample(n = 3) %>%
+  unnest()
+  
+
+# Time series plot
+p_re_ts <- ggplot() +
+  geom_line(data = df_p,
+            aes(x = hour / 24,
+                y = DO, group = sitegroup,
+                color = as.factor(strahler)),
+            alpha = 0.7,
+            size = 1.2) +
+  geom_hline(yintercept = 3, linetype = "dashed") +
+  facet_grid(rows = "geomorph") +
+  scale_x_continuous(breaks = seq(-3,8, 1)) +
+  geom_vline(xintercept = 0) +
+  # scale_color_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00")) +
+  geom_text(data = ann_text,
+            aes(x = time, y = DO, label = label)) +
   theme_bw() +
-  theme(legend.position = "none") +
-  labs(title = "rewetting patterns leading to hypoxia",
-       x = "hours after rewetting",
-       y = "DO (mg/L)")
+  theme(legend.position = c(0.8,0.3),
+        legend.background = element_rect(fill = "transparent"),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_blank()) +
+  labs(x = "days after rewetting",
+       y = expression("DO (mg "*L^{-1}*")"))
 
-
-ggsave(filename = "Z:/RHypoxie/Figures/rewetting_hypoxia_mgl.png",
-       dpi = 1200,
-       height = 18,
-       width = 28,
-       units = "cm")
-
+p_re_ts
 
 # rate of drop ------------------------------------------------------------
 df_m <- df_events %>%
-  filter(year < 2021) %>%
+  drop_na(DO) %>%
+  filter(oow != "yes") %>%
   group_by(site, group) %>%
   mutate(hour = row_number() - 1) %>%
   select(site, group, hour, DO_per, DO, temp) %>%
   pivot_longer(cols = starts_with("DO")) %>%
   group_by(site, group, name) %>%
-  drop_na() %>%
-  filter(hour < 24) %>%
+  # drop_na() %>%
+  filter(hour < 48) %>%
   nest() %>%
   mutate(mod = map(data, ~lm(value~hour, data = .)),
          t = map(mod, broom::tidy)) %>%
@@ -170,13 +216,36 @@ df_m <- df_events %>%
 df_m2 <- df_m %>%
   pivot_wider(names_from = term, values_from = estimate:p.value)
 
+# text for figure
+drop_txt <- ungroup(df_m2) %>%
+  filter(name == "DO",
+         p.value_hour < 0.05) %>%
+  summarize(mean = mean(estimate_hour * 24, na.rm = T),
+            sd = sd(estimate_hour * 24, na.rm = T),
+            med = median(estimate_hour * 24, na.rm = T)) %>%
+  mutate(x = -3, y = 0.33,
+         txt = paste0("median = ",round(med,1),
+                      "\n", "mean±sd = ",
+                      round(mean,1), "±", round(sd,1)))
+
+ungroup(df_m2) %>%
+  filter(name == "DO",
+         p.value_hour < 0.05,
+         estimate_hour < 0 ) %>%
+  summarize(mean = mean(estimate_hour * 24, na.rm = T),
+            sd = sd(estimate_hour * 24, na.rm = T),
+            med = median(estimate_hour * 24, na.rm = T))
+
 p_hist_dochange <- df_m2 %>%
-  filter(name == "DO") %>%
+  filter(name == "DO",
+         p.value_hour < 0.05) %>%
   ggplot(aes(x = estimate_hour * 24)) +
-  geom_density(fill = "red", alpha = 0.5) +
-  theme_bw() +
+  geom_density(fill = "black", alpha = 0.5) +
+  theme_classic() +
+  geom_text(data=drop_txt, aes(x =x, y =y, label = txt)) +
   geom_vline(aes(xintercept = median(estimate_hour * 24, na.rm = T))) +
-  labs(x = expression("DO change after rewetting (mg "*L^{-1}~d^{-1}*")"))
+  labs(x = expression("DO change after rewetting (mg "*L^{-1}~d^{-1}*")"),
+       y = "density")
 p_hist_dochange
 
 ggsave(plot = p_hist_dochange, 
@@ -190,37 +259,50 @@ ggsave(plot = p_hist_dochange,
 # Join meta data to rewetting do change data ----------------------------------------
 df_rew <- df_m2 %>%
   left_join(meta_rewet) %>%
-  filter(name == "DO") %>%
+  filter(name == "DO",
+         p.value_hour < 0.05) %>%
   mutate(dur_cat = case_when(
-   dur_dry < 24 ~ "1 day",
-   dur_dry < 48 ~ "2 days",
-   dur_dry < 24*7 ~ "1 week",
-   dur_dry > 24*7 ~ ">1 week",
-   TRUE ~ "1 day"
+   dur_dry < 24 ~ "1d",
+   dur_dry < 48 ~ "2d",
+   dur_dry < 24*7 ~ "7d",
+   dur_dry > 24*7 ~ ">7d",
+   TRUE ~ "1d"
   )) %>%
   mutate(dur_cat = as.factor(dur_cat),
-         dur_cat = fct_relevel(dur_cat, "1 day", "2 days", "1 week", "> 1 week")) %>%
+         dur_cat = fct_relevel(dur_cat, "1d", "2d", "7d", ">7d")) %>%
   filter(month(datetime) < 10,
          p.value_hour < 0.05)
   
-ggplot(data= df_rew,
+p_pred <- ggplot(data= df_rew,
        aes(x = freq_dry,
            y = estimate_hour * 24,
            fill = dur_cat)) +
   geom_point(shape = 21) +
+  guides(fill=guide_legend(ncol=2)) +
   # stat_summary_bin() +
-  theme_bw() +
+  theme_classic() +
   geom_hline(yintercept = 0) +
+  theme(legend.position = c(0.83,0.16), 
+        legend.background = element_rect(fill = "transparent"),
+        legend.key.size = unit(0.4, 'cm')) + 
   scale_fill_viridis_d("dry length \n before rewetting", option = "magma") +
   labs(x = "frequency of dry periods before rewetting",
-       y = "DO change after rewetting (mg/L/d)")
-  
+       y = expression("DO change after rewetting (mg "*L^{-1}~d^{-1}*")"))
+p_pred
 ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "rewet_dochange_function_drying.png"),
        dpi = 1200,
        height = 9.2,
        width = 12.4,
        units = "cm")
 
+
+# Plot everything -------------------------------------------------------------
+(p_re_ts | (p_hist_dochange / p_pred)) + plot_annotation(tag_levels = "A")
+ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "fig5.png"),
+       dpi = 1200,
+       height = 15,
+       width = 18,
+       units = "cm")
 
 # Plots of time series ----------------------------------------------------
 # Plot of time series
@@ -279,3 +361,38 @@ ggsave(plot = p_ts_re_all,
        units = "cm",
        width = 18.4,
        height = 12)
+
+
+
+# All events --------------------------------------------------------------
+
+
+
+ggplot() +
+  geom_line(data = filter(df_re_p, gs!="3 charpassonne le tél"),
+            aes(x = hour,
+                y = DO, group = gs),
+            alpha = 0.5)+
+  # geom_point(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"),
+  #            aes(x = hour, y = DO, color = color)) +
+  # stat_smooth(data = filter(df_re_p, color == TRUE, gs!="3 charpassonne le tél"), 
+  #             aes(x = hour, y = DO, group = gs),
+  #             method = "lm", se = FALSE) +
+  # ggpubr::stat_regline_equation(data = filter(df_dry_p, color == TRUE), 
+  #                               aes(x = hour, y = DO, group = gs)) +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
+  facet_wrap(~site, scales = "free_x")+
+  scale_color_manual(values = "blue") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(title = "rewetting patterns leading to hypoxia",
+       x = "hours after rewetting",
+       y = "DO (mg/L)")
+
+
+ggsave(filename = "Z:/RHypoxie/Figures/rewetting_hypoxia_mgl.png",
+       dpi = 1200,
+       height = 18,
+       width = 28,
+       units = "cm")
+
