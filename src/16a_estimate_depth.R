@@ -1,4 +1,5 @@
 library(nlme)
+library(patchwork)
 # Load DO data
 df_q <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS")) %>%
   filter(watershed %in% c("ardieres", "vauxonne", "yzeron")) %>%
@@ -10,13 +11,22 @@ df_q <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS")) %>%
   imputeTS::na_kalman()
 
 
-ggplot(data=df_q,
+p_hq <- ggplot(data=df_q,
        aes(y = h, 
            x = q^0.5,
            color = la)) +
   geom_point() +
   stat_smooth(method = "lm") +
-  scale_color_viridis_c()
+  theme_bw() + 
+  ggpubr::stat_regline_equation() +
+  scale_color_viridis_c("log(area (km2))") +
+  labs(x = expression(sqrt(specific~discharge~"["*mm~d^{-1}*"]")),
+       y = "stage (m)")
+ggsave(file.path("results", "stage_discharge_all.png"),
+       units = "cm",
+       dpi = 600,
+       height = 9,
+       width = 16)  
 
 mod =lme(h ~ sqrt(q),  
                 random = ~1 | la,
@@ -34,6 +44,29 @@ re <- random.effects(mod) %>%
   mutate(la = as.numeric(la))
 
 plot(re$la, re$int)
+
+p_re <- ggplot(data=re,
+       aes(y = int, 
+           x = la,
+           color = la)) +
+  geom_point(size = 3) +
+  stat_smooth(method = "lm") +
+  theme_bw() + 
+  ggpubr::stat_regline_equation() +
+  scale_color_viridis_c("log(area (km2))") +
+  labs(x = expression(log(area~"["*km^{-2}*"]")),
+       y = "random effect to intercept")+
+  theme(legend.position = "none")
+p_re
+p <- p_hq + p_re + plot_annotation(tag_levels = "a")+
+  plot_layout(guides = "collect")
+p
+ggsave(file.path("results", "stage_discharge_random_effects.png"),
+       units = "cm",
+       dpi = 600,
+       height = 9,
+       width = 18) 
+
 mod_re <- lm(int ~ la, data = re)
 summary(mod_re)
 

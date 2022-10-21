@@ -167,4 +167,3 @@ test2 <- mm_all_mle %>%
 streamMetabolizer::metab_night
 
 
-xx <- readRDS(file.path("results", "rhone_metabolism_bayes_preds.RDS"))

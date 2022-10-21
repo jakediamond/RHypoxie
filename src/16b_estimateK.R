@@ -24,6 +24,25 @@ df_night <- df %>%
          del_DO = DO - lag(DO),
          dateuse = if_else.(hour < 5, date - days(1), date))
 
+x <- df_night %>%
+  filter(site == "ardieres aval morcilles",
+         hour >= 1,
+         dateuse == ymd("2021-08-16"))
+
+p_ex_nr <- ggplot(data = filter(x, del_DO < 0.1),
+                  aes(x = DO_def,
+                      y = del_DO))+
+  geom_point() +
+  theme_bw() +
+  ggpubr::stat_regline_equation() + 
+  stat_smooth(method=function(formula,data,weights=weight) rlm(formula,
+                                                               data,
+                                                               weights=weight,
+                                                               psi = psi.bisquare)) +
+  labs(x = expression(DO[sat]-DO~"("*mg~L^{-1}*")"),
+       y = expression("dDO/dt ("*mg~L^{-1}~h^{-1}*")"))
+p_ex_nr
+
 # Rolling regression function
 rolling_lm <- tibbletime::rollify(
   .f = function(DO_def, del_DO) {
@@ -81,23 +100,36 @@ df_k600 <- df_night %>%
             discharge = mean(qsite_m3s, na.rm = T)) %>%
   right_join(k_out) %>%
   mutate(k2 = k2 * 24,
-         k600 = convert_kGAS_to_k600(k2, temp))
+         k600 = streamMetabolizer::convert_kGAS_to_k600(k2, temp))
 
 # Quick look just to convince ourselves
-df_k600 %>%
-    filter(site == "charbonnieres") %>%
+p_kq_ex <- right_join(df_k600, df_d) %>%
+    filter(site == "ratier aval ribes") %>%
   ggplot(aes(x = discharge,
-             y = k600)) +
-  geom_point() +
+             y = k600 / depth)) +
+  geom_point(color = "grey", alpha = 0.8) +
   theme_bw() +
-  # scale_y_log10()+
+  scale_y_log10()+
   scale_x_log10()+
-  scale_y_continuous(limits = c(0, 100)) +
+  # scale_y_continuous(limits = c(0, 100)) +
   stat_summary_bin(bins = 5) +
   stat_smooth(method=function(formula,data,weights=weight) rlm(formula,
                                                                data,
                                                                weights=weight,
-                                                               psi = psi.bisquare))
+                                                               psi = psi.bisquare)) +
+  labs(x = expression("Q ("*m^3~s^{-1}*")"),
+       y = expression("K600 ("*d^{-1}*")"))
+p_kq_ex
+library(patchwork)
+p <- p_ex_nr + p_kq_ex +plot_annotation(tag_levels = "a")
+p
+ggsave(file.path("results", "estimating_K600_metabolism.png"),
+       units = "cm",
+       dpi = 600,
+       height = 9,
+       width = 18) 
+
+
 # add depth to get K600 (1/d)
 df_k600 <- right_join(df_k600, df_d) %>%
   mutate(K600 = k600 / depth)
