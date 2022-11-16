@@ -55,7 +55,6 @@ layout2 <- c(
   area(t = 3, l = 1, b = 6, r = 4)
 )
 
-
 # Overall hypoxia info ----------------------------------------------------
 ungroup(df) %>%
   filter(!is.na(DO)) %>%
@@ -141,7 +140,7 @@ p_monthly_hyp <- df %>%
   theme_bw() +
   theme(strip.background = element_blank(),
         panel.grid = element_blank()) +
-  labs(y = "% of msmts hypoxic",
+  labs(y = "hypoxia (%)",
        x = "month")
 p_monthly_hyp
 
@@ -166,8 +165,9 @@ p_monthly_temp
 p_monthly_q <- df %>%
   mutate(year = year(date),
          q_mmd = if_else(is.na(q_mmd), q_mmh *24, q_mmd)) %>%
-  ggplot(aes(x = month,
+  ggplot(aes(x = date,
              y = q_mmd)) + 
+  # geom_ribbon(fill = "blue", alpha = 0.4, ymin = 0, aes(ymax = q_mmd)) +
   stat_summary(fill = "blue", geom = "ribbon", alpha = 0.4, ymin = 0) +
   stat_summary(color = "transparent", fill = "transparent", geom = "bar") +
   # stat_summary(color = "blue") +
@@ -176,7 +176,8 @@ p_monthly_q <- df %>%
   theme(axis.title = element_text(color = "blue"),
         axis.text = element_text(color = "blue")) +
   scale_y_continuous(position = "right") +
-  scale_x_continuous(breaks = seq(min(df$month), max(df$month), 1))+
+  scale_x_date(breaks = seq())
+  # scale_x_continuous(breaks = seq(min(df$month), max(df$month), 1))+
   # labs(y = expression("q (mm"~h^{-1}*")")) +
   labs(y = expression("q ("*mm~d^{-1}*")"),
        x = "month")
@@ -277,7 +278,7 @@ p_hour <- df %>%
   theme(strip.background = element_blank(),
         panel.grid = element_blank(),
         legend.position = "none") +
-  labs(y = "% of msmts. hypoxic",
+  labs(y = "hypoxia (%)",
        x = "hour of day",
        tag = "c")
 
@@ -333,12 +334,12 @@ p_all
 
 
 ggsave(plot = p_all,
-       filename = file.path("results", "Figures", "summaries", "hypoxia_summary_all.png"),
+       filename = file.path("results", "Figures", "Fig2.svg"),
        dpi = 1200,
        width = 18.4,
        height  = 16,
        units = "cm",
-       device = "png")
+       device = "svg")
 
 
 
