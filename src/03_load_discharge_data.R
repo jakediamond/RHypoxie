@@ -146,3 +146,19 @@ dfq_final <- select(dfqloire, siteq = site_q, datetime, q_m3s) %>%
 saveRDS(dfq_final, 
         file.path("data", "04_discharge and stage", "hourly_discharge_all.RDS"))
 distinct(dfq_final, siteq)
+
+
+# Quick plot for supplementary --------------------------------------------
+df_q <- readRDS(file.path("data", "04_discharge and stage", "hourly_discharge_all.RDS"))
+
+ggplot(data = distinct(df_q, siteq, datetime, .keep_all = T) %>%
+         mutate(date = lubridate::date(datetime)) %>%
+         group_by(siteq, date) %>%
+         summarize(q_m3s = mean(q_m3s, na.rm = T)),
+       aes(x = date,
+           y = q_m3s,
+           color = siteq)) +
+  geom_line() +
+  scale_y_log10() +
+  scale_color_viridis_d() +
+  theme_classic()

@@ -79,6 +79,18 @@ distinct(df_dry_h, sitegroup, site) %>%
   summarise(mean = mean(n),
             sd = sd(n))
 
+# What percent of time hypoxic
+df_dry_h %>%
+  group_by(site, sitegroup) %>%
+  summarize(n = sum(DOhyp == 1, na.rm = T),
+            nt = n(),
+            d = n/nt) %>%
+  ungroup() %>%
+  summarise(mean = mean(n),
+            mt = mean(d),
+            sdd = sd(d),
+            sd = sd(n))
+
 # How many of the sites that dried, did not become hypoxic?
 df_dry_o <- df_dry %>%
   group_by(site, sitegroup) %>%
@@ -116,16 +128,16 @@ df_dry_p <- df_dry_h %>%
   ungroup()
 
 # Text to avoid facet strips
-ann_text <- data.frame(hourbef = -68, DO = 2, 
+ann_text <- data.frame(hourbef = -18, DO = 10, 
                        label = c("pool", "riffle", "run"),
                        geomorph = c("pool", "riffle", "run"))
 
 # Plot of time series
 p_ts_dry <- ggplot() +
-  geom_line(data = filter(df_dry_p, site_code %in% c("coi023", "loi039", "loi068", "cha002")),
+  geom_line(data = filter(df_dry_p, site_code %in% c("coi023", "loi039", "loi068", "cha002", "loi132")),
             aes(x = hourbef, y = DO, group = sitegroup, color = as.factor(strahler)),
             size = 1.1) +
-  scale_color_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00")) +
+  scale_color_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00", "#F0E442")) +
   scale_x_continuous(limits = c(-72, 0),
                      breaks = seq(-120, 0, 24)) +
   geom_hline(yintercept = 3, linetype = "dashed") +
@@ -133,7 +145,8 @@ p_ts_dry <- ggplot() +
   geom_text(data = ann_text,
             aes(x = hourbef, y = DO, label = label)) +
   facet_grid(rows = vars(geomorph)) +
-  theme(legend.position = c(0.4,0.97), legend.direction = "horizontal",
+  theme(legend.position = "none",
+        #legend.position = c(0.4,0.97), legend.direction = "horizontal",
         legend.background = element_rect(fill = "transparent"),
         strip.background = element_blank(), strip.text = element_blank(),
         panel.grid.major.y = element_blank(),
@@ -172,7 +185,7 @@ drop_txt <- ungroup(df_m2) %>%
   summarize(mean = mean(-estimate_hour * 24, na.rm = T),
             sd = sd(-estimate_hour * 24, na.rm = T),
             med = median(-estimate_hour * 24, na.rm = T)) %>%
-  mutate(x = 3, y = 0.55,
+  mutate(x = 5, y = 0.55,
             txt = paste0("median = ",round(med,1),
                          "\n", "mean±sd = ",
                          round(mean,1), "±", round(sd,1)))
@@ -181,7 +194,8 @@ p_hist_droprates <- df_m2 %>%
   filter(name == "DO") %>%
   ggplot(aes(x = -estimate_hour * 24)) +
   geom_density(fill = "black", alpha = 0.5) +
-  theme_bw() +
+  theme_classic() +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0,10, 1)) +
   geom_vline(aes(xintercept = median(-estimate_hour * 24, na.rm = T))) +
   geom_text(data=drop_txt, aes(x =x, y =y, label = txt)) +
   labs(x = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"),
@@ -205,7 +219,7 @@ p_test <- df_m2 %>%
              y = -estimate_hour * 24)) +
   stat_summary() + 
   # geom_density(fill = "red", alpha = 0.5) +
-  theme_bw() +
+  theme_classic() +
   # geom_vline(aes(xintercept = median(-estimate_hour * 24, na.rm = T))) +
   labs(y = expression("rate of DO decrease (mg "*L^{-1}~d^{-1}*")"))
 p_test
@@ -400,6 +414,7 @@ df_hyp_length <- df_dry_p %>%
 x = ungroup(df_hyp_length) %>%
   select(sitegroup, geomorph, strahler, DOhyp, cons) %>%
   mutate(match = ceiling(row_number() /2)) %>%
+  drop_na(DOhyp) %>%
   pivot_wider(names_from = DOhyp, values_from = cons)
 
 ggplot(data = x,
@@ -428,7 +443,7 @@ p_len_cons_hyp <- ggplot(data = df_hyp_length,
   theme(legend.position = "none") + 
   scale_y_continuous(limits = c(0, 30)) +
   labs(x = "Strahler order",
-       y = "length of consecutive hypoxia (hours)")
+       y = "consecutive hypoxia duration (h)")
 
 
 p_len_cons_hyp
@@ -439,9 +454,24 @@ ggsave(plot = p_len_cons_hyp,
        width = 9.2,
        units = "cm")
   
+
+
+p_len_cons_hyp_geo <- ggplot(data = df_hyp_length,
+                         aes(x = geomorph,
+                             y = cons,
+                             group = geomorph,
+                             fill = as.factor(geomorph))) +
+  geom_boxplot() +
+  scale_fill_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00")) +
+  theme_classic() +
+  theme(legend.position = "none") + 
+  scale_y_continuous(limits = c(0, 30)) +
+  labs(x = "habitat",
+       y = "consecutive hypoxia duration (h)")
+p_len_cons_hyp_geo
 # Overall plot ------------------------------------------------------------
 (p_ts_dry | (p_hist_droprates / p_len_cons_hyp)) + plot_annotation(tag_levels = "A")
-ggsave(filename = file.path("results", "Figures", "drying_summaries", "fig4.png"),
+ggsave(filename = file.path("results", "Figures", "drying_summaries", "fig4_v2.svg"),
        dpi = 1200,
        height = 15,
        width = 18,

@@ -19,6 +19,13 @@ dfq <- select(dfq, -h_cm) %>%
   mutate(siteq = str_replace_all(siteq, " ", "_"),
          siteq = tolower(siteq))
 
+# Calculate dry time
+df_dry_time <- dfq %>%
+  group_by(siteq, year(datetime)) %>%
+  summarize(dry = sum(q_m3s < 0.001, na.rm = T),
+            n = n(),
+            per= dry / n)
+
 # Nest the data for easy use
 dfqn <- dfq %>%
   mutate(year = year(datetime)) %>%
@@ -58,6 +65,12 @@ dflf <- dfqn %>%
 
 dflf2 <- dfqn %>%
   mutate(lf = map(data, low.spells)) %>%
+  select(-data) %>%
+  unnest(cols = lf)
+
+# zero days
+df0 <- dfqn %>%
+  mutate(lf = map(data, low.spells, threshold = 0.0001)) %>%
   select(-data) %>%
   unnest(cols = lf)
 

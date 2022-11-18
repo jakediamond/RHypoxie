@@ -52,9 +52,7 @@ df_storm_final <- df_storm %>%
   group_by(sitegroup) %>%
   mutate(time = as.numeric((datetime - start.date) / 86400))
   
-  
-
-# Save the data for later use
+  # Save the data for later use
 saveRDS(df_storm_final, file.path("data", "10_clean_data", "hypoxia_storm_new.RDS"))
 df_storm_final <- readRDS(file.path("data", "10_clean_data", "hypoxia_storm_new.RDS"))
 
@@ -214,6 +212,7 @@ layout <- c(
   area(t = 1, l = 1, b = 8, r = 4),
   area(t = 6, l = 1, b = 8, r = 4)
 )
+
 # Storms ------------------------------------------------------------------
 # Get ready to plot
 df_st_p <- df_storm_final %>%
@@ -663,6 +662,39 @@ ggsave(filename = "Figures/DO_inversion_examples/coise_larajasse_april_may.png",
 
 
 
+
+# Hysteresis --------------------------------------------------------------
+# Choose the events to plot
+ps <- c("1coi071", "1loi068", "4loi068", #riffle
+        "2ard046", "2coi023", "12mor009", #pool
+        "5viz062", "3mar233", "5fon013" #run
+)
+
+p_hyst <- ggplot(data = filter(df_st_p, sitegroup %in% ps) %>%
+         group_by(geomorph) %>%
+         mutate(group = dense_rank(sitegroup)),
+       aes(x = q_mmd,
+           y = DO,
+           color = time,
+           group = sitegroup)) +
+  geom_path(size = 1.2) +
+  facet_grid(rows = vars(geomorph), cols = vars(group)) +
+  scale_color_viridis_c() +
+  scale_x_log10() +
+  theme_classic() +
+  labs(y = expression("DO ("*mg~L^{-1}*")"),
+       x = expression("specific discharge (mm "*d^{-1}*")")) +
+  theme(legend.position = c(0.07, 0.85),
+        legend.background = element_rect(fill = "transparent",
+                                         color = "black"),
+        legend.key.size = unit(0.5, 'cm'))
+
+ggsave(filename = file.path("results", "Figures", "storm_summaries", 
+                            "FigSX_hysteresis.png"),
+       dpi = 1200,
+       height = 18.4,
+       width = 18.4,
+       units = "cm")
 
 # Test of spc and DO entropy ----------------------------------------------
 ent.fun <- function(x) {

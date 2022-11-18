@@ -63,7 +63,7 @@ df_rewet %>%
   filter(type == "rewetting") %>%
   mutate(sitegroup = paste0(group, site)) %>%
   ungroup() %>%
-  distinct(site)
+  distinct(sitegroup)
 
 # How many distinct sites
 df_rewet %>%
@@ -102,45 +102,41 @@ ungroup(meta_rewet) %>%
             sddur = sd(dur_dry/24, na.rm = T),
             sdfreq = sd(freq_dry, na.rm = T))
 
+# meta_rewet %>%
+#   filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
+#   ggplot(aes(x = dur_dry / 24)) +
+#   geom_density(fill = "orange", alpha = 0.5) +
+#   theme_bw() +
+#   scale_x_continuous(limits = c(0,10)) +
+#   geom_vline(aes(xintercept = median(dur_dry / 24, na.rm = T))) +
+#   labs(x = "duration of dry period before rewetting (days)")
 
 
-meta_rewet %>%
-  filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
-  ggplot(aes(x = dur_dry / 24)) +
-  geom_density(fill = "orange", alpha = 0.5) +
-  theme_bw() +
-  scale_x_continuous(limits = c(0,10)) +
-  geom_vline(aes(xintercept = median(dur_dry / 24, na.rm = T))) +
-  labs(x = "duration of dry period before rewetting (days)")
-
-
-ggsave(plot = p_hist_droprates, 
-       filename = file.path("results", "Figures", "rewetting_summaries", "rewet_droprate_hist.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 9.2,
-       units = "cm")
-
-meta_rewet %>%
-  filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
-  ggplot(aes(x = freq_dry)) +
-  geom_density(fill = "orange", alpha = 0.5) +
-  theme_bw() +
-  # scale_x_continuous(limits = c(0,10)) +
-  geom_vline(aes(xintercept = median(freq_dry, na.rm = T))) +
-  labs(x = "number of dry periods before rewetting")
-
-
-ggsave(plot = p_hist_droprates, 
-       filename = file.path("results", "Figures", "rewetting_summaries", "rewet_droprate_hist.png"),
-       dpi = 1200,
-       height = 9.2,
-       width = 9.2,
-       units = "cm")
-
-
+# ggsave(plot = p_hist_droprates, 
+#        filename = file.path("results", "Figures", "rewetting_summaries", "rewet_droprate_hist.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 9.2,
+#        units = "cm")
+# 
+# meta_rewet %>%
+#   filter(!(site %in% c("mercier amont presles", "thiollet"))) %>%
+#   ggplot(aes(x = freq_dry)) +
+#   geom_density(fill = "orange", alpha = 0.5) +
+#   theme_bw() +
+#   # scale_x_continuous(limits = c(0,10)) +
+#   geom_vline(aes(xintercept = median(freq_dry, na.rm = T))) +
+#   labs(x = "number of dry periods before rewetting")
+# 
+# 
+# ggsave(plot = p_hist_droprates, 
+#        filename = file.path("results", "Figures", "rewetting_summaries", "rewet_droprate_hist.png"),
+#        dpi = 1200,
+#        height = 9.2,
+#        width = 9.2,
+#        units = "cm")
 # Plots -------------------------------------------------------------------
-df_re_p <- df_events %>%
+df_re_p <- df_re %>% #change to df_events to get everything
   distinct() %>%
   group_by(site) %>%
   # filter(oow == "no" | is.na(oow)) %>%
@@ -152,21 +148,27 @@ df_re_p <- df_events %>%
          sitegroup = paste0(group, site)) %>%
   left_join(meta_geom)
 
-# Text to avoid facet strips
-ann_text <- data.frame(time = 0.5, DO = 10, 
-                       label = c("pool", "riffle", "run"),
-                       geomorph = c("pool", "riffle","run"))
+# # Text to avoid facet strips
+# ann_text <- data.frame(time = 0.5, DO = 10, 
+#                        label = c("pool", "riffle", "run"),
+#                        geomorph = c("pool", "riffle","run"))
+ann_text <- data.frame(time = 0.5, DO = 10,
+                       label = c("pool", "run"),
+                       geomorph = c("pool", "run"))
+
 
 df_p <- ungroup(df_re_p) %>%
   drop_na(geomorph) %>%
   drop_na(DO) %>%
+  # filter(geomorph != "riffle", strahler < 4) %>%
   group_by(site, sitegroup, geomorph) %>%
-  filter(n() > 24, n() < 24*8, year == 2020, min(DO) < 5) %>%
+  # filter(between(hour, 0, 24*6),
+  #        n() > 24, min(DO) < 3) %>%
+  filter(n() > 24, n() < 24*8, min(DO) < 5) #%>%
   nest() %>%
   group_by(geomorph) %>%
   slice_sample(n = 3) %>%
   unnest()
-  
 
 # Time series plot
 p_re_ts <- ggplot() +
@@ -177,15 +179,16 @@ p_re_ts <- ggplot() +
             alpha = 0.7,
             size = 1.2) +
   geom_hline(yintercept = 3, linetype = "dashed") +
-  facet_grid(rows = "geomorph") +
+  facet_grid(rows = vars(geomorph)) +
   scale_x_continuous(breaks = seq(-3,8, 1)) +
-  geom_vline(xintercept = 0) +
-  # scale_color_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00")) +
+  # geom_vline(xintercept = 0) +
+  scale_color_manual(name = "Strahler", values = c("black", "#0072B2", "#D55E00")) +
   geom_text(data = ann_text,
             aes(x = time, y = DO, label = label)) +
   theme_bw() +
   theme(legend.position = c(0.8,0.3),
         legend.background = element_rect(fill = "transparent"),
+        legend.box.background = element_rect(fill = "transparent"),
         panel.grid.minor.x = element_blank(),
         panel.grid.major.y = element_blank(),
         panel.grid.minor.y = element_blank(),
@@ -283,10 +286,10 @@ p_pred <- ggplot(data= df_rew,
   theme_classic() +
   geom_hline(yintercept = 0) +
   theme(legend.position = c(0.83,0.16), 
-        legend.background = element_rect(fill = "transparent"),
+        legend.background = element_rect(fill = "transparent", color= "black"),
         legend.key.size = unit(0.4, 'cm')) + 
   scale_fill_viridis_d("dry length \n before rewetting", option = "magma") +
-  labs(x = "frequency of dry periods before rewetting",
+  labs(x = "# of dry periods before rewetting",
        y = expression("DO change after rewetting (mg "*L^{-1}~d^{-1}*")"))
 p_pred
 ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "rewet_dochange_function_drying.png"),
@@ -298,7 +301,7 @@ ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "rewet_
 
 # Plot everything -------------------------------------------------------------
 (p_re_ts | (p_hist_dochange / p_pred)) + plot_annotation(tag_levels = "A")
-ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "fig5.png"),
+ggsave(filename = file.path("results", "Figures", "rewetting_summaries", "fig5_v2.png"),
        dpi = 1200,
        height = 15,
        width = 18,
