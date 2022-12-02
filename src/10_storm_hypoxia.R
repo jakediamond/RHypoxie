@@ -276,7 +276,7 @@ p_geomorph
 # Calculate drop rates ----------------------------------------------------
 # Dissolved oxygen at the beginning and lowest value for each flushing flow
 df_diff <- df_st_p %>%
-  group_by(sitegroup) %>%
+  group_by(sitegroup, site) %>%
   filter(time >= 0) %>%
   filter(time == 0 | rank(DO, ties.method = "first") == 1) %>%
   select(DO, DO_per, start.date, time) %>%
@@ -285,6 +285,14 @@ df_diff <- df_st_p %>%
   pivot_wider(names_from = type, values_from = c(DO, DO_per, time)) %>%
   left_join(distinct(select(ungroup(df_st_p), sitegroup, strahler, geomorph))) %>%
   mutate(drop = DO_begin - DO_end)
+
+x = df_diff %>%
+  mutate(d = drop / time_end)
+ggplot(data = x,
+       aes(x = site,
+           y = d)) +
+  stat_summary()
+
 
 # Better version
 df_diff2 <- left_join(df_storm_final, df_cat) %>%

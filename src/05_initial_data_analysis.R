@@ -62,6 +62,14 @@ ungroup(df) %>%
             n = n(),
             per = hy / n)
 
+# Distinct sites that were hypoxic
+ungroup(df) %>%
+  filter(!is.na(DO)) %>%
+  group_by(site) %>%
+  filter(sum(DOhyp == 1, na.rm = T) > 1) %>%
+  distinct(site)
+
+distinct(df, site)
 # Overall hypoxia percentages by site
 df_hyp_per <- ungroup(df) %>%
   group_by(site) %>%
@@ -105,6 +113,17 @@ df_hyp_diff <- ungroup(df_hyp_rls) %>%
 df_hyp_pds <- df_hyp_rls %>%
   group_by(site) %>%
   summarize(pds = max(hyp_pd, na.rm = T))
+
+# Sites with at least one hour hypoxia
+df_hyp_1hr <- df %>%
+  filter(DOhyp == 1) %>%
+  distinct(site)
+
+# Sites with at least 1% hour hypoxia
+df_hyp_1per <- df %>%
+  group_by(site) %>%
+  filter((sum(DOhyp == 1, na.rm = T) / n()) > 0.01)%>%
+  distinct(site)
 
 # probability of nighttime hypoxia given hypoxia
 df_hyp_night <- df %>%
