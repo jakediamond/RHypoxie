@@ -6,14 +6,20 @@
 
 # Load libraries
 library(lubridate)
+library(ggpubr)
 library(streamMetabolizer)
 library(tidyverse)
 
-
 # Load data ---------------------------------------------------------------
-df <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS")) %>%
-  left_join(readRDS(file.path("data", "site_meta_data.RDS")))
+df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS"))
+df_loire <- readRDS(file.path("data", "09_loire_data", 
+                              "loire_metab_do_summary.RDS")) %>%
+  select(site, date, GPP, ER, K600=k) %>%
+  distinct()
 
+df <- bind_rows(df_rhone, df_loire) %>%
+  mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) %>%
+  left_join(readRDS(file.path("data", "site_meta_data.RDS")))
 # Metabolism plots --------------------------------------------------------
 df_met_p <- df %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
@@ -29,6 +35,47 @@ df_met_p <- df %>%
   mutate(sitef = fct_reorder2(as.factor(site),#paste0(site, "; ", round(area_km2, 1),
                                          #     " km2")),
                               watershed, -area_km2))
+
+ggviolin(filter(df_met_p, name == "ER"), x = "position", 
+         y = "value", fill = "position",
+         palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+         facet.by = "confluence",
+         add = "boxplot", add.params = list(fill = "white"))+
+  stat_compare_means(comparisons = list( c("down", "up_1"), 
+                                         # c("up_1", "up_2"), 
+                                         c("down", "up_2") ),
+                     label = "p.signif")  
+
+ggviolin(filter(df_loire, name == "DO_def_min") %>%
+           mutate(site = if_else(site == "coise aval coizet", 
+                                 "coise aval vaudragon", site)) %>%
+           left_join(readRDS(file.path("data", "site_meta_data.RDS"))), 
+         x = "position", 
+         y = "def_sum", fill = "position",
+         palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+         facet.by = "confluence",
+         add = "boxplot", add.params = list(fill = "white"))+
+  stat_compare_means(comparisons = list( c("down", "up_1"), 
+                                         # c("up_1", "up_2"), 
+                                         c("down", "up_2") ),
+                     label = "p.signif")  
+
+# Confluence plots
+ggplot(data = filter(df_met_p, name == "ER"),
+       aes(x = position,
+           y = value,
+           fill = position)) +
+  geom_violin(add = "boxplot", add.params = list(fill = "white")) +
+  # stat_summary() +
+  facet_wrap(~confluence) +
+  scale_fill_manual(values =c("#00AFBB", "#E7B800", "#FC4E07")) +
+  theme_classic() +
+  ggpubr::stat_compare_means(comparisons = list( c("down", "up_1"), 
+                                                 # c("up_1", "up_2"), 
+                                                 c("down", "up_2") ),
+                             label = "p.signif")#+ # Add pairwise comparisons p-value
+  # ggpubr::stat_compare_means()  
+
 
 # Ardieres plots
 p_metabolism_ard <- filter(df_met_p, watershed == "ardieres") %>%

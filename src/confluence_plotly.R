@@ -1,43 +1,67 @@
 # 
-# Purpose: To plot confluence data for RHypoxie sites
+# Purpose: To summarize DO data for Loire headwaters
 # Author: Jake Diamond
-# Date: July 1, 2021
+# Date: October 3, 2019
 # 
 
+# Set working directory
+# setwd("Z:/Loire_DO")
+# setwd("C:/Users/jake.diamond/Documents/Backup of Network/Loire_DO")
+# setwd("C:/Users/diamo/Dropbox/Projects/Loire_headwaters")
+setwd("C:/Users/jake.diamond/Dropbox/Projects/Loire_headwaters")
 # Load libraries
-library(htmltools)
-library(plotly)
 library(lubridate)
+library(tidytext)
 library(readxl)
-library(scales)
+library(plotly)
+library(patchwork)
 library(tidyverse)
 
-# Load data
-df <- readRDS(file.path("data", "02_sensor_data", 
-                        "timeseries_data_hourly_new.RDS"))
+# Load data and calculate percent saturation
+df <- readRDS("Headwaters/Data/headwaters_data_clean") %>%
+  rename(site = Site,
+         subwatershed = Subwatershed) %>%
+  mutate(site = tolower(site),
+         date = date(datetime))
+
+# Discharge data
+dfq <- readRDS("Headwaters/Data/Discharge/discharge_plus_v2.RDS")
+
+# Join data
+df <- left_join(df, dfq, by = c("site", "date", "subwatershed"))
 
 # Read in watershed info
-conf_meta <- read_excel(file.path("data", "01_metadata", "sensor_metadata.xlsx"), 
-                        sheet = "site_metadata") %>%
-  mutate(pos_num = position,
-         position = word(position, 1,1, "_")) %>%
-  select(site, pos_num, position, confluence) %>%
-  distinct()
+conf_meta <- read_excel("Headwaters/Data/confluence_metadata.xlsx") %>%
+  mutate(site = tolower(Site))
 
-# Join to metadata
-df_conf <- select(df, -position) %>%
-  left_join(conf_meta)
+# Need to remove a few points, still not completely clean
+df_conf <- df %>%
+  filter(site_code == "fon003" & datetime == "2020-04-13 15:00:00") %>%
+  mutate_if(is.numeric, ~NA_real_) %>%
+  bind_rows(df %>%
+              filter(!(site_code == "fon003" & datetime == "2020-04-13 15:00:00"))) %>%
+  # filter(!(site_code == "car004" & date >= ymd("2020-03-28"))) %>%
+  arrange(subwatershed, area_km2, datetime) %>%
+  ungroup() %>%
+  group_by(subwatershed) %>%
+  left_join(conf_meta) %>%
+  mutate(DOd = DO * h)
 
 # Interactive plotly graphs
 # First need to get nest data
 df_ply <- df_conf %>%
+  dplyr::filter(!is.na(conf)) %>%
   ungroup() %>%
-  arrange(confluence, position, datetime) %>%
-  group_by(confluence) %>%
+  mutate(alpha = 0.0192+8E-5*DO_temp,
+         spc = cond / (1 + alpha * (DO_temp - 25))) %>%
+  select(datetime, conf, position, pos_num, site, DO, DOd, DO_temp, q_mmd,
+         DO_per, cond, lux, spc) %>%
+  arrange(conf, position) %>%
+  group_by(conf) %>%
   nest()
 
 # Create a graphing function
-graph_fun <- function(data, y1 = "DO", confluence = "confluence") {
+graph_fun <- function(data, y1 = "DO", confluence = "conf") {
   
   p_y1 <- parse(text = y1)
   # p_y2 <- parse(text = y2)
@@ -58,6 +82,7 @@ graph_fun <- function(data, y1 = "DO", confluence = "confluence") {
   yaxis_1 = switch(y1,
                    "DO" = "DO (mg/L)",
                    "DO_per" = "DO (% sat.)",
+                   "DO_temp" = "temp (deg C)",
                    "cond" = "conductivity (uS/cm)",
                    "spc" = "specific conductance (uS/cm)",
                    "DOd" = "DO x depth (g/m2)")
@@ -71,6 +96,7 @@ graph_fun <- function(data, y1 = "DO", confluence = "confluence") {
     switch(y1,
            "DO" = c(0,15),
            "DO_per" = c(0,150),
+           "DO_temp" = c(0, 25),
            "cond" = c(0,1500),
            "spc" = c(0, 1500),
            "DOd" = c(0,3))
@@ -92,15 +118,15 @@ graph_fun <- function(data, y1 = "DO", confluence = "confluence") {
     #           showlegend = FALSE) %>%
     # add_trace(data = data_oow,
     #           x=~datetime, y=~eval(p_y2), type = "scatter", mode='lines',
-  #           color = I("tomato"), linetype = I("dot"),
-  #           yaxis="y2",
-  #           showlegend = FALSE) %>%
-  # add_trace(data = pts_site,
-  #           color = I("black"),
-  #           x=~Datetime, y=~eval(p_y1), type = "scatter", mode = 'markers',
-  #           showlegend = FALSE) %>%
-  # add_trace(data = pts_site,
-  #           x=~Datetime, y=~eval(p_y2), type = "scatter", mode = 'markers',
+    #           color = I("tomato"), linetype = I("dot"),
+    #           yaxis="y2",
+    #           showlegend = FALSE) %>%
+    # add_trace(data = pts_site,
+    #           color = I("black"),
+    #           x=~Datetime, y=~eval(p_y1), type = "scatter", mode = 'markers',
+    #           showlegend = FALSE) %>%
+    # add_trace(data = pts_site,
+    #           x=~Datetime, y=~eval(p_y2), type = "scatter", mode = 'markers',
   #           color = I("red"),
   #           yaxis = 'y2',
   #           showlegend = FALSE) %>%
@@ -123,31 +149,21 @@ graph_fun <- function(data, y1 = "DO", confluence = "confluence") {
 
 # Apply graph function to data
 df_ply <- df_ply %>%
-  mutate(p_do = pmap(list(data, confluence = confluence),
-                     graph_fun),
-         p_doper = pmap(list(data, "DO_per", confluence),
-                        graph_fun),
-         p_cond = pmap(list(data, "cond", confluence),
+  mutate(p_do = pmap(list(data, confluence = conf),
+                          graph_fun),
+         p_doper = pmap(list(data, "DO_per", conf),
+                            graph_fun),
+         p_temp = pmap(list(data, "DO_temp", conf),
                        graph_fun),
-         p_spc = pmap(list(data, "spc", confluence),
-         graph_fun))
-
+         p_cond = pmap(list(data, "cond", conf),
+                           graph_fun),
+         p_spc = pmap(list(data, "spc", conf),
+                       graph_fun),
+         p_dod = pmap(list(data, "DOd", conf),
+                       graph_fun))
 # Check out the graphs
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 3)))
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 4)))
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 5)))
 htmltools::browsable(htmltools::tagList(pluck(df_ply, 6)))
-
-df_conf2 <- df_conf %>%
-  group_by(confluence) %>%
-  select(datetime, confluence, pos_num, DO, DO_per, DO_temp, cond_temp, cond, spc) %>%
-  pivot_wider(values_from = c(DO, DO_per, DO_temp, cond_temp, cond, spc), 
-                        names_from = pos_num) %>%
-  mutate(rc = (cond_down - cond_up_2) / (cond_up_1 - cond_down),
-         rct = (cond_temp_down - cond_temp_up_2) / (cond_temp_up_1 - cond_temp_down),
-         rspc = (spc_down - spc_up_2) / (spc_up_1 - spc_down),
-         rdt = (DO_temp_down - DO_temp_up_2) / (DO_temp_up_1 - DO_temp_down),
-         DO_pred = (rc*DO_up_1 + DO_up_2) / (1 + rc),
-         DO_diff = (DO_down - DO_pred) / DO_pred * 100
-         )
-
+htmltools::browsable(htmltools::tagList(pluck(df_ply, 7)))

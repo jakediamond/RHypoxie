@@ -149,3 +149,15 @@ df_met <- df_k600 %>%
   imputeTS::na_kalman()
 
 saveRDS(df_met, file.path("data", "k_estimates_for_bayes.RDS"))
+
+k = readRDS(file.path("data", "k_estimates_for_bayes.RDS"))
+k = left_join(k, distinct(select(df, strahler, site, area_km2)))
+
+k %>%
+  group_by(site, strahler, area_km2) %>%
+  summarize(k = mean(meanlnK)) %>%
+  ggplot(aes(x = area_km2,
+             y = exp(k))) +
+  geom_point()
+
+streamMetabolizer::calc_depth()
