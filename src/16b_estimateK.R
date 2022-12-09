@@ -6,7 +6,7 @@ library(tidytable)
 
 # Load data ---------------------------------------------------------------
 # Load DO data
-df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all.RDS")) %>%
+df <- readRDS(file.path("data", "10_clean_data", "hourly_data_all_including2022.RDS")) %>%
   filter.(watershed %in% c("ardieres", "vauxonne", "yzeron"))
 
 # Load depth data
@@ -25,9 +25,9 @@ df_night <- df %>%
          dateuse = if_else.(hour < 5, date - days(1), date))
 
 x <- df_night %>%
-  filter(site == "ardieres aval morcilles",
-         hour >= 1,
-         dateuse == ymd("2021-08-16"))
+  filter(site == "vernus",
+         # hour >= 1,
+         dateuse == ymd("2021-07-11"))
 
 p_ex_nr <- ggplot(data = filter(x, del_DO < 0.1),
                   aes(x = DO_def,
@@ -104,7 +104,7 @@ df_k600 <- df_night %>%
 
 # Quick look just to convince ourselves
 p_kq_ex <- right_join(df_k600, df_d) %>%
-    filter(site == "ratier aval ribes") %>%
+    filter(site == "mercier amont presles") %>%
   ggplot(aes(x = discharge,
              y = k600 / depth)) +
   geom_point(color = "grey", alpha = 0.8) +

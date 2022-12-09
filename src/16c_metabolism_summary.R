@@ -9,6 +9,7 @@ library(lubridate)
 library(ggpubr)
 library(streamMetabolizer)
 library(tidyverse)
+library(tidytable)
 
 # Load data ---------------------------------------------------------------
 df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS"))
@@ -20,6 +21,15 @@ df_loire <- readRDS(file.path("data", "09_loire_data",
 df <- bind_rows(df_rhone, df_loire) %>%
   mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) %>%
   left_join(readRDS(file.path("data", "site_meta_data.RDS")))
+
+df_temp <- readRDS(file.path("data", "10_clean_data", 
+                        "hourly_data_all_including2022.RDS")) %>%
+  select(site, date, temp, tair) %>%
+  group_by(site, date) %>%
+  summarize(temp = mean(temp, na.rm = T),
+                   tair = mean(tair, na.rm= T)) %>%
+  ungroup()
+
 # Metabolism plots --------------------------------------------------------
 df_met_p <- df %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
@@ -34,7 +44,16 @@ df_met_p <- df %>%
   drop_na() %>%
   mutate(sitef = fct_reorder2(as.factor(site),#paste0(site, "; ", round(area_km2, 1),
                                          #     " km2")),
-                              watershed, -area_km2))
+                              watershed, -area_km2)) %>%
+  left_join(df_temp)
+
+filter(df_met_p, name == "GPP") %>%
+  ggplot(aes(x = area_km2,
+             y = value,
+             color = watershed)) +
+  stat_summary() +
+  scale_x_log10() +
+  scale_y_log10()
 
 ggviolin(filter(df_met_p, name == "ER"), x = "position", 
          y = "value", fill = "position",

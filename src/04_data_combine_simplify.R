@@ -8,9 +8,11 @@ library(lubridate)
 library(readxl)
 library(tidytext)
 library(tidyverse)
+library(tidytable)
 
 # Load DO/temp/conductivity data
-sens <- readRDS(file.path("Data", "02_sensor_data", "all_sensor_data_clean_wide.RDS"))
+sens <- readRDS(file.path("Data", "02_sensor_data", 
+                          "all_sensor_data_clean_with_2022.RDS"))
 
 # Read in all meteorological data
 meteo <- readRDS(file.path("Data", "05_meteo", "meteo_data.RDS"))
@@ -34,10 +36,13 @@ q_meta <- read_xlsx(file.path("data", "01_metadata", "site_meta_data_all.xlsx"))
 # Get to hourly data to simplify
 sens_hour <- sens %>%
   mutate(hour = floor_date(datetime, "hour")) %>%
-  group_by(watershed, confluence, position, site, hour) %>%
+  group_by(watershed, confluence, position, site, hour, type) %>%
   summarize(across(where(is.numeric), mean, na.rm = TRUE)) %>%
   rename(datetime = hour) %>%
-  ungroup()
+  ungroup() %>%
+  pivot_wider(names_from = type, values_from = c(value, temp), names_sep = "_") %>%
+  rename(DO = value_DO, cond = value_conductivity, light = value_light,
+         DO_temp = temp_DO, cond_temp = temp_conductivity, light_temp = temp_light)
 
 meteo_hour <- meteo %>%
   mutate(hour = floor_date(datetime, "hour")) %>%
@@ -54,8 +59,10 @@ df <- sens_hour %>%
   ungroup() %>%
   mutate(tair_site = tair - 0.0098 * (altitude_m - elev_ref)) %>% #air temp. at site; adiabatic dry lapse rate
   mutate(press_e = p_mbar * exp((-0.03416262 / (tair_site + 273)) * 
-                                  (altitude_m - elev_ref))) %>%  #pressure at site; -0.034 = -g*M/R
-  mutate(DOsat = LakeMetabolizer::o2.at.sat.base(DO_temp, press_e), #theoretical DO saturation based on garcia-benson eqn
+                                  (altitude_m - elev_ref))) %>%   #pressure at site; -0.034 = -g*M/R) %>%  
+  mutate(DOsat = if_else(is.na(press_e),
+                         LakeMetabolizer::o2.at.sat.base(DO_temp, altitude = altitude_m),
+                         LakeMetabolizer::o2.at.sat.base(DO_temp, press_e)), #theoretical DO saturation based on garcia-benson eqn
          DOsat2 = if_else(DO_temp == 0,
                           0,
                           14.652 - 0.41022 * DO_temp + 0.007991 *
@@ -67,7 +74,7 @@ df <- sens_hour %>%
          spc = cond / (1 + alpha * (cond_temp - 25))) # calculate spc based on logger specs
 
 # Save ardieres and yzeron data
-saveRDS(df, file.path("data", "10_clean_data", "hourly_data_2021.RDS"))
+saveRDS(df, file.path("data", "10_clean_data", "rhone_hourly_data_including2022.RDS"))
 
 # Bring in some meta data
 df2 <- readRDS(file.path("data", "10_clean_data", "hourly_data_2021.RDS")) %>%
@@ -140,7 +147,7 @@ df_final <- df_all2 %>%
                                 oow))
 
 # Save
-saveRDS(df_final, file.path("data","10_clean_data", "hourly_data_all.RDS"))
+saveRDS(df_final, file.path("data","10_clean_data", "hourly_data_all_including2022.RDS"))
 
 # Get a dataframe of daily discharge data
 df_q <- df2 %>%
