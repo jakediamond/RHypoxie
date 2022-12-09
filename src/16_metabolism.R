@@ -83,6 +83,7 @@ bayes_mod
 # look at data needs
 metab_inputs("bayes", "data")
 specs(bayes_mod)
+
 # Metabolism function for nested data ---------------------------------------
 met_fun <- function(data, data_q, data_k, mod_type = bayes_mod){
   # Calculate the natural-log-space centers of the discharge bins
@@ -115,12 +116,12 @@ met_fun <- function(data, data_q, data_k, mod_type = bayes_mod){
 # Run the metabolism model on nested data ---------------------------------
 metab_all <- df_n %>%
   filter(site == "charbonnieres") %>%
-  transmute(mm = pmap(list(data, data_q, data_k),
+  dplyr::transmute(mm = purrr::pmap(list(data, data_q, data_k),
                        ~met_fun(data = ..1,
                                 data_q = ..2,
                                 data_k = ..3)))
 
-# saveRDS(metab_all, "C:/Users/jacob.diamond/Desktop/rhone_metabolism_bayes_new_no_priors.RDS")
+saveRDS(metab_all, "charbonnieres_metabolism.RDS")
 # metab_all <- readRDS(file.path("data", "rhone_metabolism_mle.RDS"))
 # Inspect the model -------------------------------------------------------
 df_metab <- metab_all %>%
@@ -129,7 +130,8 @@ df_metab <- metab_all %>%
   select(-mm) %>%
   unnest(cols = c(k, met), names_repair = "unique") %>%
   ungroup()
-saveRDS(mm_mle, file.path("data", "rhone_metabolism_mle_preds.RDS"))
+
+# saveRDS(mm_mle, file.path("data", "rhone_metabolism_mle_preds.RDS"))
 
 df_metab <- left_join(df_metab, df_q)
 mc <- streamMetabolizer::get_mcmc(m)

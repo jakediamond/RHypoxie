@@ -30,6 +30,13 @@ df_temp <- readRDS(file.path("data", "10_clean_data",
                    tair = mean(tair, na.rm= T)) %>%
   ungroup()
 
+ggplot(data= filter(df, between(K600, 1000, 5000)),
+       aes(x = K600,
+           y = -ER,
+           color = month(date))) +
+  geom_point()+
+  facet_wrap(~site)
+
 # Metabolism plots --------------------------------------------------------
 df_met_p <- df %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
