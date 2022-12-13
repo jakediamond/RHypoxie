@@ -58,6 +58,14 @@ df_rewet <- df %>%
          type = if_else(group %% 2 != 0, "rewetting", "dry")) %>%
   filter(group > 1)
 
+# Number of dry days per site
+df_dry_length <- ungroup(df_rewet) %>%
+  distinct(site, datetime, .keep_all = TRUE) %>%
+  group_by(site, year) %>%
+  summarize(dry_length = sum(type == "dry", na.rm = T) / 24)
+
+write_excel_csv(df_dry_length, file.path("data", "dry_lengths_by_site_year.csv"))
+
 # How many total rewetting events
 df_rewet %>%
   filter(type == "rewetting") %>%

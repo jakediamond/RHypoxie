@@ -12,23 +12,55 @@ library(tidyverse)
 library(tidytable)
 
 # Load data ---------------------------------------------------------------
-df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS"))
-df_loire <- readRDS(file.path("data", "09_loire_data", 
-                              "loire_metab_do_summary.RDS")) %>%
-  select(site, date, GPP, ER, K600=k) %>%
-  distinct()
+df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS")) %>%
+  left_join(df_d) %>%
+  distinct() %>%
+  mutate(k_md =depth*K600)
 
-df <- bind_rows(df_rhone, df_loire) %>%
-  mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) %>%
-  left_join(readRDS(file.path("data", "site_meta_data.RDS")))
+df_loire <- readRDS(file.path("data", "09_loire_data", 
+                              "metab_DO_summary.RDS")) %>%
+  select(site, date, GPP, ER, K600=k, depth) %>%
+  distinct() %>%
+  mutate(k_md = depth*K600)
+
+df_met <- bind_rows(df_rhone, df_loire) %>%
+  mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) #%>%
+  # left_join(readRDS(file.path("data", "site_meta_data.RDS")))
+
+rollmean <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 7)
+rollmean30 <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 30)
 
 df_temp <- readRDS(file.path("data", "10_clean_data", 
                         "hourly_data_all_including2022.RDS")) %>%
-  select(site, date, temp, tair) %>%
-  group_by(site, date) %>%
-  summarize(temp = mean(temp, na.rm = T),
-                   tair = mean(tair, na.rm= T)) %>%
+  select(site, date, temp) %>%
+  group_by(site) %>%
+  mutate(temp_7 = rollmean(temp),
+         temp_30 = rollmean30(temp)) %>%
+  summarize(temp_mean = mean(temp, na.rm = T),
+            temp_max7 = max(temp_7, na.rm = T),
+            temp_max30 = max(temp_30, na.rm = T)) %>%
   ungroup()
+
+df_met_DO <- df_met %>%
+  mutate(GPP = if_else(GPP < 0, 0, GPP),
+         ER = if_else(ER > 0, 0, ER)) %>%
+  mutate(NEP = GPP + ER) %>%
+  group_by(site) %>%
+  summarize(GPP = mean(GPP, na.rm = T),
+            ER = mean(ER, na.rm = T),
+            NEP = mean(NEP, na.rm = T),
+            K600 = mean(K600, na.rm = T),
+            k_md = mean(k_md, na.rm = T)) %>%
+  left_join(df_temp)
+
+df_met_DO <- df_met_DO %>%
+  left_join(select(df_hyp_per, site, per_hyp = per)) %>%
+  left_join(df %>%
+              group_by(site) %>%
+              summarize(DOmin = min(DO, na.rm = TRUE),
+                        DO10 = quantile(DO, 0.1, na.rm = T)))
+
+write_excel_csv(df_met_DO, file = file.path("data", "DO_temp_met_summary.csv"))
 
 ggplot(data= filter(df, between(K600, 1000, 5000)),
        aes(x = K600,

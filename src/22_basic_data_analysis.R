@@ -11,13 +11,15 @@ library(scales)
 library(patchwork)
 library(tidytext)
 library(tidyverse)
+library(tidytable)
 
 # Load all data
 df <- readRDS(file.path("data", "10_clean_data", 
-                        "hourly_data_all_including2022.RDS"))
+                        "rhone_hourly_data_including2022.RDS"))
 
 df_met <- readRDS()
-
+x= filter(df, confluence == "ratier_ribes", month(datetime) == 7, year == 2022,
+          day(datetime) == 26)
 # Max and min stuff -------------------------------------------------------
 # DO daily min max etc
 do_daily <- df %>%

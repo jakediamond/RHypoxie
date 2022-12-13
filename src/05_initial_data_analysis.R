@@ -72,9 +72,9 @@ ungroup(df) %>%
 distinct(df, site)
 # Overall hypoxia percentages by site
 df_hyp_per <- ungroup(df) %>%
-  group_by(site) %>%
-  summarize(hy = sum(DOhyp, na.rm = T),
-            n = n(),
+  dplyr::group_by(site) %>%
+  dplyr::summarize(hy = sum(DOhyp, na.rm = T),
+            n = dplyr::n(),
             per = hy / n)
 
 # hypoxia run lengths
