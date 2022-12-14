@@ -12,36 +12,38 @@ library(tidyverse)
 library(tidytable)
 
 # Load data ---------------------------------------------------------------
-df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS")) %>%
-  left_join(df_d) %>%
+df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS"))# %>%
+  # left_join(df_d) %>%
   distinct() %>%
-  mutate(k_md =depth*K600)
+  # mutate(k_md =depth*K600)
 
 df_loire <- readRDS(file.path("data", "09_loire_data", 
-                              "metab_DO_summary.RDS")) %>%
-  select(site, date, GPP, ER, K600=k, depth) %>%
-  distinct() %>%
-  mutate(k_md = depth*K600)
+                              "loire_metab_DO_summary.RDS")) %>%
+  select(site, date, GPP, ER, K600=k) #%>%#, depth) %>%
+  # distinct()# %>%
+  # mutate(k_md = depth*K600)
 
 df_met <- bind_rows(df_rhone, df_loire) %>%
   mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) #%>%
   # left_join(readRDS(file.path("data", "site_meta_data.RDS")))
 
-rollmean <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 7)
-rollmean30 <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 30)
+# rollmean <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 7)
+# rollmean30 <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 30)
 
 df_temp <- readRDS(file.path("data", "10_clean_data", 
                         "hourly_data_all_including2022.RDS")) %>%
-  select(site, date, temp) %>%
-  group_by(site) %>%
-  mutate(temp_7 = rollmean(temp),
-         temp_30 = rollmean30(temp)) %>%
-  summarize(temp_mean = mean(temp, na.rm = T),
-            temp_max7 = max(temp_7, na.rm = T),
-            temp_max30 = max(temp_30, na.rm = T)) %>%
-  ungroup()
+  select(watershed, area_km2, site, date, temp) %>%
+  # group_by(site) %>%
+  # mutate(temp_7 = rollmean(temp),
+  #        temp_30 = rollmean30(temp)) %>%
+  # summarize(temp_mean = mean(temp, na.rm = T),
+  #           temp_max7 = max(temp_7, na.rm = T),
+  #           temp_max30 = max(temp_30, na.rm = T)) %>%
+  # ungroup()
+  group_by(watershed, area_km2, site, date) %>%
+  summarize(temp = mean(temp, na.rm = T))
 
-df_met_DO <- df_met %>%
+df_met_all <- df_met %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
          ER = if_else(ER > 0, 0, ER)) %>%
   mutate(NEP = GPP + ER) %>%
@@ -49,18 +51,18 @@ df_met_DO <- df_met %>%
   summarize(GPP = mean(GPP, na.rm = T),
             ER = mean(ER, na.rm = T),
             NEP = mean(NEP, na.rm = T),
-            K600 = mean(K600, na.rm = T),
-            k_md = mean(k_md, na.rm = T)) %>%
+            K600 = mean(K600, na.rm = T)) %>%
+            # k_md = mean(k_md, na.rm = T)) %>%
   left_join(df_temp)
 
-df_met_DO <- df_met_DO %>%
-  left_join(select(df_hyp_per, site, per_hyp = per)) %>%
-  left_join(df %>%
-              group_by(site) %>%
-              summarize(DOmin = min(DO, na.rm = TRUE),
-                        DO10 = quantile(DO, 0.1, na.rm = T)))
+# df_met_DO <- df_met_DO %>%
+#   left_join(select(df_hyp_per, site, per_hyp = per)) %>%
+#   left_join(df %>%
+#               group_by(site) %>%
+#               summarize(DOmin = min(DO, na.rm = TRUE),
+#                         DO10 = quantile(DO, 0.1, na.rm = T)))
 
-write_excel_csv(df_met_DO, file = file.path("data", "DO_temp_met_summary.csv"))
+# write_excel_csv(df_met_DO, file = file.path("data", "DO_temp_met_summary.csv"))
 
 ggplot(data= filter(df, between(K600, 1000, 5000)),
        aes(x = K600,
@@ -70,7 +72,7 @@ ggplot(data= filter(df, between(K600, 1000, 5000)),
   facet_wrap(~site)
 
 # Metabolism plots --------------------------------------------------------
-df_met_p <- df %>%
+df_met_p <- df_met_all %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
          ER = if_else(ER > 0, 0, ER)) %>%
   group_by(site) %>%
@@ -89,10 +91,50 @@ df_met_p <- df %>%
 filter(df_met_p, name == "GPP") %>%
   ggplot(aes(x = area_km2,
              y = value,
-             color = watershed)) +
-  stat_summary() +
+             fill = watershed)) +
+  scale_fill_brewer(type = 'qual') +
+  stat_summary(shape = 21) +
+  stat_smooth(method = "lm", aes(color = watershed))  +
+  scale_color_brewer(type = 'qual') +
+  theme_bw() +
   scale_x_log10() +
-  scale_y_log10()
+  scale_y_log10() +
+  annotation_logticks() +
+  labs(x = "surface de BV (km2)",
+       y = "GPP (g O2/m2/d)")
+
+ggsave(file.path("results", "figures", "GPP_vs_area_all_sites.png"),
+       dpi = 600,
+       height = 12,
+       width = 16,
+       units = "cm")
+
+filter(df_met_p, name == "GPP") %>%
+  filter(between(month(date), 3, 6)) %>%
+  rename(km2 = area_km2) %>%
+  group_by(site, watershed, km2) %>%
+  summarize(temp = mean(temp),
+            GPP = mean(value)) %>%
+  ggplot(aes(x = temp,
+             y = GPP,
+             fill = watershed,
+             size = log(km2))) +
+  scale_fill_brewer(type = 'qual') +
+  stat_summary(shape = 21, alpha = 0.7)  +
+  # stat_smooth(method = "lm", aes(color = watershed))  +
+  # scale_color_brewer(type = 'qual') +
+  theme_bw() +
+  # scale_x_log10() +
+  # scale_y_log10() +
+  # annotation_logticks() +
+  labs(x = "température moyenne (°C)",
+       y = "GPP (g O2/m2/d)")
+
+ggsave(file.path("results", "figures", "GPP_vs_temp_all_sites.png"),
+       dpi = 600,
+       height = 12,
+       width = 16,
+       units = "cm")
 
 ggviolin(filter(df_met_p, name == "ER"), x = "position", 
          y = "value", fill = "position",

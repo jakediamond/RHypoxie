@@ -123,13 +123,19 @@ metab_all <- df_n %>%
 
 saveRDS(metab_all, "charbonnieres_metabolism.RDS")
 # metab_all <- readRDS(file.path("data", "rhone_metabolism_mle.RDS"))
+metab_all <- readRDS("charbonnieres_metabolism.RDS")
 # Inspect the model -------------------------------------------------------
 df_metab <- metab_all %>%
   mutate(met = map(mm, predict_metab),
          k = map(mm, get_params)) %>%
   select(-mm) %>%
-  unnest(cols = c(k, met), names_repair = "unique") %>%
+  tidyr::unnest(cols = c(k, met), names_repair = "unique") %>%
   ungroup()
+
+ggplot(df_metab,
+       aes(x = K600.daily,
+           y = ER)) +
+  geom_point()
 
 # saveRDS(mm_mle, file.path("data", "rhone_metabolism_mle_preds.RDS"))
 
@@ -139,7 +145,7 @@ plot(log(df_metab$discharge.daily), df_metab$K600.daily)
 plot(df_metab$K600.daily, -df_metab$ER.daily)
 
 d = pluck(metab_all, 2, 1)
-m = pluck(metab_all, 2, 1)
+m = pluck(metab_all, 1, 1)
 streamMetabolizer::plot_distribs(m, parname = "K600_daily")
 get_specs(m)$params_in
 plot_metab_preds(m)

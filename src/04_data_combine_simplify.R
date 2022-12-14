@@ -77,7 +77,7 @@ df <- sens_hour %>%
 saveRDS(df, file.path("data", "10_clean_data", "rhone_hourly_data_including2022.RDS"))
 
 # Bring in some meta data
-df2 <- readRDS(file.path("data", "10_clean_data", "hourly_data_2021.RDS")) %>%
+df2 <- readRDS(file.path("data", "10_clean_data", "rhone_hourly_data_including2022.RDS")) %>%
   left_join(read_xlsx(file.path("data", "01_metadata", "site_meta_data_all.xlsx")) %>%
               select(site, site_code, strahler, area_km2))
 
@@ -114,7 +114,7 @@ df_all <- left_join(df_all, q_meta) %>%
 # Calculate discharge at each site
 df_all2 <- df_all %>%
   group_by(site, year) %>%
-  mutate(q_int = imputeTS::na_kalman(q_m3s), #fill in gaps
+  mutate(q_int = imputeTS::na_kalman(q_m3s, maxgap = 24*60), #fill in gaps
          q_mmh = q_int * 3.6 / area_q_km2, # m3S to mm/h
          qsite_m3s = q_mmh *area_km2 / 3.6, # estimated discharge at each sensor
          q_mmd = q_mmh * 24) %>% # mm/h to mm/d
@@ -150,7 +150,7 @@ df_final <- df_all2 %>%
 saveRDS(df_final, file.path("data","10_clean_data", "hourly_data_all_including2022.RDS"))
 
 # Get a dataframe of daily discharge data
-df_q <- df2 %>%
+df_q <- df_all2 %>%
   mutate(date = date(datetime)) %>%
   select(-q_mmh) %>%
   distinct(siteq, q_mmd, date) %>%

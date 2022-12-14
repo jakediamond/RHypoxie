@@ -11,7 +11,7 @@ library(tidyverse)
 
 # Load data
 # First get data path and names of files for discharge and stage
-data_path <- "Data/04_discharge and stage/raw_bdoh_data"
+data_path <- file.path("data", "04_discharge and stage", "raw_bdoh_data")
 files_q <- dir(data_path, pattern = "*discharge.xlsx")
 files_h <- dir(data_path, pattern = "*stage.xlsx")
 
@@ -25,7 +25,7 @@ dfq <- tibble(path = c(rep(data_path, length(files_q))),
                                          col_types = c("date", "numeric",
                                                        "guess", "guess", "guess")))
          ) %>%
-  unnest(cols = c(file_contents)) %>%
+  tidyr::unnest(cols = c(file_contents)) %>%
   mutate(siteq = word(filename, 1, sep = "_")) %>%
   select(siteq, 
          datetime = DateHeure, 
@@ -46,7 +46,7 @@ dfh <- tibble(path = c(rep(data_path, length(files_h))),
                                           col_types = c("date", "numeric",
                                                         "guess", "guess", "guess")))
   ) %>%
-  unnest(cols = c(file_contents)) %>%
+  tidyr::unnest(cols = c(file_contents)) %>%
   mutate(siteq = word(filename, 1, sep = "_")) %>%
   select(siteq, 
          datetime = DateHeure, 
@@ -110,7 +110,7 @@ ggplot(data = df_15min,
   ggpubr::stat_regline_equation()
 
 # save data
-saveRDS(df_15min, "Data/04_discharge and stage/all_discharge_data_15min.RDS")
+saveRDS(df_15min, file.path("data","04_discharge and stage", "all_discharge_data_15min.RDS"))
 
 # Save as xlsx with sheets
 # Split one data frame per site
@@ -122,7 +122,7 @@ list_of_dfs %>%
   map(~unique(.)) -> names(list_of_dfs)
 
 list_of_dfs %>%
-  writexl::write_xlsx(path = "Data/04_discharge and stage/all_discharge_data_15min.xlsx")
+  writexl::write_xlsx(path = file.path("data","04_discharge and stage", "all_discharge_data_15min.xlsx"))
 
 
 # Combine all discharge data into hourly format ---------------------------
