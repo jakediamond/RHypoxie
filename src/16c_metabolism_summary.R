@@ -12,27 +12,38 @@ library(tidyverse)
 library(tidytable)
 
 # Load data ---------------------------------------------------------------
-df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS"))# %>%
+df_rhone <- readRDS(file.path("results", "rhone_metabolism_bayes_preds_new.RDS")) %>%
   # left_join(df_d) %>%
-  distinct() %>%
+  distinct() #%>%
   # mutate(k_md =depth*K600)
 
 df_loire <- readRDS(file.path("data", "09_loire_data", 
                               "loire_metab_DO_summary.RDS")) %>%
   select(site, date, GPP, ER, K600=k) #%>%#, depth) %>%
-  # distinct()# %>%
+   distinct()# %>%
   # mutate(k_md = depth*K600)
 
 df_met <- bind_rows(df_rhone, df_loire) %>%
   mutate(site = if_else(site == "coise aval coizet", "coise aval vaudragon", site)) #%>%
   # left_join(readRDS(file.path("data", "site_meta_data.RDS")))
 
+# All base hourly data
+df <- readRDS(file.path("data", "10_clean_data", 
+                  "hourly_data_all_including2022.RDS"))
+
+df %>%
+  group_by(site, date) %>%
+  filter(DO == min(DO, na.rm = T)) %>%
+  ungroup() %>%
+  ggplot(aes(x = hour(datetime))) +
+  geom_histogram()
+
 # rollmean <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 7)
 # rollmean30 <- tibbletime::rollify(~mean(.x, na.rm = TRUE), window = 30)
 
-df_temp <- readRDS(file.path("data", "10_clean_data", 
-                        "hourly_data_all_including2022.RDS")) %>%
-  select(watershed, area_km2, site, date, temp) %>%
+# Just daily temperature and light (lux)
+df_temp <- df %>%
+  select(watershed, area_km2, site, date, temp, lux) %>%
   # group_by(site) %>%
   # mutate(temp_7 = rollmean(temp),
   #        temp_30 = rollmean30(temp)) %>%
@@ -41,19 +52,27 @@ df_temp <- readRDS(file.path("data", "10_clean_data",
   #           temp_max30 = max(temp_30, na.rm = T)) %>%
   # ungroup()
   group_by(watershed, area_km2, site, date) %>%
-  summarize(temp = mean(temp, na.rm = T))
+  summarize(temp = mean(temp, na.rm = T),
+            lux = mean(lux, na.rm = T))
 
 df_met_all <- df_met %>%
   mutate(GPP = if_else(GPP < 0, 0, GPP),
          ER = if_else(ER > 0, 0, ER)) %>%
   mutate(NEP = GPP + ER) %>%
-  group_by(site) %>%
+  group_by(site, date) %>%
   summarize(GPP = mean(GPP, na.rm = T),
             ER = mean(ER, na.rm = T),
             NEP = mean(NEP, na.rm = T),
             K600 = mean(K600, na.rm = T)) %>%
             # k_md = mean(k_md, na.rm = T)) %>%
   left_join(df_temp)
+
+df_met_all %>%
+  ungroup() %>%
+  mutate(year = year(date)) %>%
+  group_by(site) %>%
+  summarize(across(where(is.numeric), mean, na.rm= T)) %>%
+  arrange(-NEP)
 
 # df_met_DO <- df_met_DO %>%
 #   left_join(select(df_hyp_per, site, per_hyp = per)) %>%
@@ -63,13 +82,77 @@ df_met_all <- df_met %>%
 #                         DO10 = quantile(DO, 0.1, na.rm = T)))
 
 # write_excel_csv(df_met_DO, file = file.path("data", "DO_temp_met_summary.csv"))
+gpp_dat <- df_met_all %>%
+  filter(site == "toranche aval", year(date) == 2020) %>%
+  filter(date < ymd(20200702))
 
-ggplot(data= filter(df, between(K600, 1000, 5000)),
-       aes(x = K600,
-           y = -ER,
-           color = month(date))) +
-  geom_point()+
-  facet_wrap(~site)
+p_gpp <- ggplot(gpp_dat, aes(x = date, y = GPP)) +
+  geom_point(aes(y = GPP))+ geom_line(aes(y = GPP)) +
+  theme_bw() +
+  labs(x = "date", y = expression("GPP (g "*O[2]~m^{-2}~j^{-1}*")"),
+       title = "toranche aval 2020")
+  
+p_light <- ggplot(gpp_dat, aes(x = date, y = lux)) +
+  geom_area(aes(y = lux), alpha = 0.7, fill = "orange") +
+  theme_second_axis +
+  theme(axis.title = element_text(color = "orange"),
+        axis.text = element_text(color = "orange")) +
+  # scale_x_continuous(breaks = seq(min(df_met_all$month), max(df$month), 1))+
+  scale_y_continuous(position = "right") +
+  # labs(y = expression("q (mm"~h^{-1}*")")) +
+  labs(y = expression("rayonnment (lux)"))
+
+
+p_gpp_ex <- p_gpp + p_light +
+  plot_layout(design = layout)
+p_gpp_ex
+
+ggsave(plot = p_gpp_ex,
+       filename = file.path("results", "figures", "report", "gpp_ex_toranche_aval.png"),
+       dpi = 1200,
+       width = 15,
+       height = 12,
+       units = "cm"
+)
+
+
+
+er_dat <- df_met_all %>%
+  filter(site == "le potensinet", year(date) == 2020)
+
+p_er <- ggplot(er_dat, aes(x = date, y = ER)) +
+  geom_point(aes(y = ER))+ geom_line(aes(y = ER)) +
+  geom_point(aes(y = GPP), color = "darkgreen")+ geom_line(aes(y = GPP), color = "darkgreen") +
+  theme_bw() +
+  geom_hline(yintercept = 0) +
+  annotate(x = ymd(20200708), y= 0.8, label = "GPP", color = "darkgreen", geom = "text") +
+  annotate(x = ymd(20200715), y= -2.2, label = "ER", color = "black", geom = "text") +
+  labs(x = "date", y = expression("metabolism (g "*O[2]~m^{-2}~j^{-1}*")"),
+       title = "le potensinet 2020")
+p_er
+# p_temp <- ggplot(er_dat, aes(x = date, y = temp)) +
+#   geom_line(alpha = 0.7, color = "red") +
+#   theme_second_axis +
+#   theme(axis.title = element_text(color = "red"),
+#         axis.text = element_text(color = "red")) +
+#   # scale_x_continuous(breaks = seq(min(df_met_all$month), max(df$month), 1))+
+#   scale_y_continuous(position = "right") +
+#   # labs(y = expression("q (mm"~h^{-1}*")")) +
+#   labs(y = expression("température (°C)"))
+
+
+# p_er_ex <- p_er + p_temp +
+#   plot_layout(design = layout)
+p_er_ex
+
+ggsave(plot = p_er,
+       filename = file.path("results", "figures", "report", "er_ex_potensinet.png"),
+       dpi = 1200,
+       width = 15,
+       height = 12,
+       units = "cm"
+)
+
 
 # Metabolism plots --------------------------------------------------------
 df_met_p <- df_met_all %>%
