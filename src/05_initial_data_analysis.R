@@ -362,6 +362,16 @@ ggsave(plot = p_all,
 
 
 
+
+# Data for report supplement ----------------------------------------------
+df_sup1 <- readRDS(file.path("results", "hypoxia_summary.RDS")) %>%
+  left_join(distinct(ungroup(df), site, watershed)) %>%
+  mutate(basin = if_else(watershed %in% c("ardieres", "vauxonne", "yzeron"),
+                         "Rhône",
+                         "Loire")) %>%
+  select(-mean_us, -med_us)
+
+write_excel_csv2(df_sup1, file.path("results", "hypoxia_summary_rapport.csv"))
 # Day vs night, summer vs not ----------------------------------------------------------------
 
 df %>%
